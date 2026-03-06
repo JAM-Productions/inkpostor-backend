@@ -1,0 +1,72 @@
+{
+    "categories": [
+        {
+            "name": "Animals",
+            "words": [
+                "Dog",
+                "Cat",
+                "Elephant",
+                "Giraffe",
+                "Penguin",
+                "Kangaroo",
+                "Lion",
+                "Tiger",
+                "Bear",
+                "Monkey",
+                "Dolphin",
+                "Whale"
+            ]
+        },
+        {
+            "name": "Food",
+            "words": [
+                "Pizza",
+                "Hamburger",
+                "Sushi",
+                "Taco",
+                "Ice Cream",
+                "Hot Dog",
+                "Spaghetti",
+                "Pancake",
+                "Waffle",
+                "Donut",
+                "Avocado",
+                "Watermelon"
+            ]
+        },
+        {
+            "name": "Objects",
+            "words": [
+                "Bicycle",
+                "Telephone",
+                "Computer",
+                "Television",
+                "Chair",
+                "Table",
+                "Bed",
+                "Sofa",
+                "Lamp",
+                "Clock",
+                "Camera",
+                "Guitar"
+            ]
+        },
+        {
+            "name": "Places",
+            "words": [
+                "Hospital",
+                "School",
+                "Library",
+                "Supermarket",
+                "Park",
+                "Beach",
+                "Mountain",
+                "Forest",
+                "City",
+                "Village",
+                "Airport",
+                "Train Station"
+            ]
+        }
+    ]
+}
