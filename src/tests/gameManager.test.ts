@@ -11,8 +11,8 @@ import {
     proceedToDrawing,
     castVote,
     playAgain,
-} from './gameManager';
-import { Player, StrokeData } from './types';
+} from '../gameManager';
+import { Player, StrokeData } from '../types';
 
 describe('gameManager', () => {
     // Helper to create basic players
