@@ -80,9 +80,9 @@ export function startGame(roomId: string): GameRoom | null {
     room.secretWord = category.words[wordIndex];
 
     // Setup Turns
-    room.turnOrder = room.players.map((p) => p.id).sort(
-        () => Math.random() - 0.5
-    );
+    room.turnOrder = room.players
+        .map((p) => p.id)
+        .sort(() => Math.random() - 0.5);
     room.turnIndex = 0;
     room.currentTurnPlayerId = room.turnOrder[0];
 
