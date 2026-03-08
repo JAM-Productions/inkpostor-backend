@@ -3,10 +3,17 @@ import http from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import {
-    createRoom, joinRoom, getRoom, leaveRoom,
-    startGame, proceedToDrawing, nextTurn,
-    addStroke, castVote, playAgain,
-    clearCanvas
+    createRoom,
+    joinRoom,
+    getRoom,
+    leaveRoom,
+    startGame,
+    proceedToDrawing,
+    nextTurn,
+    addStroke,
+    castVote,
+    playAgain,
+    clearCanvas,
 } from './gameManager';
 import { Player, StrokeData } from './types';
 
@@ -17,8 +24,8 @@ const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
         origin: '*',
-        methods: ['GET', 'POST']
-    }
+        methods: ['GET', 'POST'],
+    },
 });
 
 const socketToRoom: Record<string, string> = {};
@@ -28,7 +35,12 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('createRoom', ({ roomId, playerName }) => {
         createRoom(roomId, socket.id);
-        const player: Player = { id: socket.id, name: playerName, isConnected: true, score: 0 };
+        const player: Player = {
+            id: socket.id,
+            name: playerName,
+            isConnected: true,
+            score: 0,
+        };
         const room = joinRoom(roomId, player);
         if (room) {
             socket.join(roomId);
@@ -43,7 +55,12 @@ io.on('connection', (socket: Socket) => {
             // Auto-create room if it doesn't exist for MVP simplicity
             room = createRoom(roomId, socket.id);
         }
-        const player: Player = { id: socket.id, name: playerName, isConnected: true, score: 0 };
+        const player: Player = {
+            id: socket.id,
+            name: playerName,
+            isConnected: true,
+            score: 0,
+        };
         const joinedRoom = joinRoom(roomId, player);
         if (joinedRoom) {
             socket.join(roomId);
@@ -63,12 +80,12 @@ io.on('connection', (socket: Socket) => {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
 
             // Send private roles
-            room.players.forEach(p => {
+            room.players.forEach((p) => {
                 const isImpostor = p.id === room.impostorId;
                 io.to(p.id).emit('roleAssignment', {
                     isImpostor,
                     secretWord: isImpostor ? null : room.secretWord,
-                    secretCategory: room.secretCategory
+                    secretCategory: room.secretCategory,
                 });
             });
         }
@@ -120,7 +137,10 @@ io.on('connection', (socket: Socket) => {
                 // Send full unsanitized state so everyone sees the impostor
                 io.to(roomId).emit('gameStateUpdate', room);
             } else {
-                io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+                io.to(roomId).emit(
+                    'gameStateUpdate',
+                    getSanitizedRoomState(room)
+                );
             }
         }
     });
@@ -141,7 +161,10 @@ io.on('connection', (socket: Socket) => {
             leaveRoom(roomId, socket.id);
             const room = getRoom(roomId);
             if (room) {
-                io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+                io.to(roomId).emit(
+                    'gameStateUpdate',
+                    getSanitizedRoomState(room)
+                );
             }
             delete socketToRoom[socket.id];
         }
@@ -156,8 +179,8 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
 
     return {
         ...room,
-        impostorId: null,      // Hidden
-        secretWord: null       // Hidden
+        impostorId: null, // Hidden
+        secretWord: null, // Hidden
     };
 }
 
