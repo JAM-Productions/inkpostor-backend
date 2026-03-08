@@ -22,7 +22,7 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         turnOrder: [],
         turnIndex: 0,
         votes: {},
-        canvasStrokes: []
+        canvasStrokes: [],
     };
     rooms[roomId] = newRoom;
     return newRoom;
@@ -37,7 +37,9 @@ export function joinRoom(roomId: string, player: Player): GameRoom | null {
     if (!room) return null;
 
     // Check if player already exists (reconnecting)
-    const existingPlayerIndex = room.players.findIndex(p => p.id === player.id || p.name === player.name);
+    const existingPlayerIndex = room.players.findIndex(
+        (p) => p.id === player.id || p.name === player.name
+    );
     if (existingPlayerIndex >= 0) {
         room.players[existingPlayerIndex].isConnected = true;
         room.players[existingPlayerIndex].id = player.id; // Update socket id
@@ -52,7 +54,7 @@ export function joinRoom(roomId: string, player: Player): GameRoom | null {
 export function leaveRoom(roomId: string, playerId: string) {
     const room = rooms[roomId];
     if (!room) return;
-    const player = room.players.find(p => p.id === playerId);
+    const player = room.players.find((p) => p.id === playerId);
     if (player) {
         player.isConnected = false;
     }
@@ -69,21 +71,27 @@ export function startGame(roomId: string): GameRoom | null {
     room.impostorId = room.players[impostorIndex].id;
 
     // Pick Word
-    const categoryIndex = Math.floor(Math.random() * wordData.categories.length);
+    const categoryIndex = Math.floor(
+        Math.random() * wordData.categories.length
+    );
     const category = wordData.categories[categoryIndex];
     const wordIndex = Math.floor(Math.random() * category.words.length);
     room.secretCategory = category.name;
     room.secretWord = category.words[wordIndex];
 
     // Setup Turns
-    room.turnOrder = [...room.players.map(p => p.id)].sort(() => Math.random() - 0.5);
+    room.turnOrder = room.players
+        .map((p) => p.id)
+        .sort(() => Math.random() - 0.5);
     room.turnIndex = 0;
     room.currentTurnPlayerId = room.turnOrder[0];
 
     // Reset state
     room.votes = {};
     room.canvasStrokes = [];
-    room.players.forEach(p => { p.hasVoted = false; });
+    room.players.forEach((p) => {
+        p.hasVoted = false;
+    });
 
     room.phase = 'ROLE_REVEAL';
     return room;
@@ -105,7 +113,11 @@ export function nextTurn(roomId: string): GameRoom | null {
     return room;
 }
 
-export function addStroke(roomId: string, playerId: string, stroke: StrokeData): GameRoom | null {
+export function addStroke(
+    roomId: string,
+    playerId: string,
+    stroke: StrokeData
+): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (room.currentTurnPlayerId !== playerId) return null; // Only active player can draw
@@ -130,16 +142,20 @@ export function proceedToDrawing(roomId: string): GameRoom | null {
     return room;
 }
 
-export function castVote(roomId: string, voterId: string, votedForId: string): GameRoom | null {
+export function castVote(
+    roomId: string,
+    voterId: string,
+    votedForId: string
+): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'VOTING') return null;
 
     room.votes[voterId] = votedForId;
-    const voter = room.players.find(p => p.id === voterId);
+    const voter = room.players.find((p) => p.id === voterId);
     if (voter) voter.hasVoted = true;
 
     // Check if everyone has voted
-    const totalConnected = room.players.filter(p => p.isConnected).length;
+    const totalConnected = room.players.filter((p) => p.isConnected).length;
     const totalVotesCast = Object.keys(room.votes).length;
 
     if (totalVotesCast >= totalConnected && totalConnected > 0) {
@@ -161,6 +177,8 @@ export function playAgain(roomId: string): GameRoom | null {
     room.turnIndex = 0;
     room.votes = {};
     room.canvasStrokes = [];
-    room.players.forEach(p => { p.hasVoted = false; });
+    room.players.forEach((p) => {
+        p.hasVoted = false;
+    });
     return room;
 }

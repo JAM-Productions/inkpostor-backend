@@ -1,4 +1,9 @@
-export type GamePhase = 'LOBBY' | 'ROLE_REVEAL' | 'DRAWING' | 'VOTING' | 'RESULTS';
+export type GamePhase =
+    | 'LOBBY'
+    | 'ROLE_REVEAL'
+    | 'DRAWING'
+    | 'VOTING'
+    | 'RESULTS';
 
 export interface Player {
     id: string; // Socket ID or UUID
