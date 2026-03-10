@@ -19,9 +19,13 @@ import {
 } from './gameManager';
 import { Player, StrokeData } from './types';
 
-const SECRET_KEY = process.env.JWT_SECRET || 'supersecret';
-
 dotenv.config();
+
+const SECRET_KEY = process.env.JWT_SECRET;
+
+if (!SECRET_KEY) {
+    throw new Error('JWT_SECRET is not defined');
+}
 
 const app = express();
 app.use(cors());
@@ -222,7 +226,7 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
 }
 
 function generateToken(username: string) {
-    return jwt.sign({ name: username }, SECRET_KEY, {
+    return jwt.sign({ name: username }, SECRET_KEY as string, {
         expiresIn: '1h',
     });
 }
