@@ -62,7 +62,7 @@ io.use((socket, next) => {
         // Attach user info to socket for later use
         (socket as any).user = payload;
         next();
-    } catch (err) {
+    } catch {
         next(new Error('Authentication error: invalid token'));
     }
 });
@@ -70,7 +70,7 @@ io.use((socket, next) => {
 io.on('connection', (socket: Socket) => {
     console.log('User connected:', socket.id);
 
-    socket.on('createRoom', ({ roomId, playerName }) => {
+    socket.on('createRoom', ({ roomId }) => {
         const user = (socket as any).user;
         createRoom(roomId, socket.id);
         const player: Player = {
@@ -87,7 +87,7 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('joinRoom', ({ roomId, playerName }) => {
+    socket.on('joinRoom', ({ roomId }) => {
         const user = (socket as any).user;
         let room = getRoom(roomId);
         if (!room) {
