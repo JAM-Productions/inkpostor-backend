@@ -2,6 +2,8 @@ import express from 'express';
 import http from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
+import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
 import {
     createRoom,
     joinRoom,
@@ -17,27 +19,59 @@ import {
 } from './gameManager';
 import { Player, StrokeData } from './types';
 
+const SECRET_KEY = process.env.JWT_SECRET || 'supersecret';
+
+dotenv.config();
+
 const app = express();
 app.use(cors());
+app.use(express.json());
+
+app.post('/auth', (req, res) => {
+    const { username } = req.body;
+    if (!username)
+        return res.status(400).json({ message: 'Username required' });
+
+    const token = generateToken(username);
+    res.json({ token });
+});
 
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: '*',
+        origin: process.env.INKPOSTOR_FRONTEND_URL || 'http://localhost:5173',
         methods: ['GET', 'POST'],
     },
 });
 
 const socketToRoom: Record<string, string> = {};
 
+io.use((socket, next) => {
+    const token =
+        socket.handshake.auth?.token ||
+        socket.handshake.headers['authorization'];
+    if (!token) {
+        return next(new Error('Authentication error: token missing'));
+    }
+    try {
+        const payload = jwt.verify(token as string, SECRET_KEY);
+        // Attach user info to socket for later use
+        (socket as any).user = payload;
+        next();
+    } catch (err) {
+        next(new Error('Authentication error: invalid token'));
+    }
+});
+
 io.on('connection', (socket: Socket) => {
     console.log('User connected:', socket.id);
 
     socket.on('createRoom', ({ roomId, playerName }) => {
+        const user = (socket as any).user;
         createRoom(roomId, socket.id);
         const player: Player = {
             id: socket.id,
-            name: playerName,
+            name: user.name,
             isConnected: true,
             score: 0,
         };
@@ -50,6 +84,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('joinRoom', ({ roomId, playerName }) => {
+        const user = (socket as any).user;
         let room = getRoom(roomId);
         if (!room) {
             // Auto-create room if it doesn't exist for MVP simplicity
@@ -57,7 +92,7 @@ io.on('connection', (socket: Socket) => {
         }
         const player: Player = {
             id: socket.id,
-            name: playerName,
+            name: user.name,
             isConnected: true,
             score: 0,
         };
@@ -74,7 +109,7 @@ io.on('connection', (socket: Socket) => {
     socket.on('startGame', () => {
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = startGame(roomId);
+        const room = startGame(roomId, socket.id);
         if (room) {
             // Send global state to everyone EXCEPT the secret word and impostor status
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
@@ -94,7 +129,7 @@ io.on('connection', (socket: Socket) => {
     socket.on('proceedToDrawing', () => {
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = proceedToDrawing(roomId);
+        const room = proceedToDrawing(roomId, socket.id);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
@@ -122,7 +157,7 @@ io.on('connection', (socket: Socket) => {
     socket.on('endTurn', () => {
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = nextTurn(roomId);
+        const room = nextTurn(roomId, socket.id);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
@@ -148,7 +183,7 @@ io.on('connection', (socket: Socket) => {
     socket.on('playAgain', () => {
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = playAgain(roomId);
+        const room = playAgain(roomId, socket.id);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
@@ -176,12 +211,20 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     if (!room) return null;
     // If game is over, reveal everything
     if (room.phase === 'RESULTS') return room;
+    // Ensure only authenticated user data is exposed
+    // (socket user info is attached in middleware; no secret data here)
 
     return {
         ...room,
         impostorId: null, // Hidden
         secretWord: null, // Hidden
     };
+}
+
+function generateToken(username: string) {
+    return jwt.sign({ name: username }, SECRET_KEY, {
+        expiresIn: '1h',
+    });
 }
 
 const PORT = process.env.PORT || 3001;
