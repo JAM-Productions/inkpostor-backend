@@ -33,10 +33,10 @@ const corsOptions = {
     methods: ['GET', 'POST'],
 };
 
-// 10 requests per minute per IP
+// 30 requests per minute per IP
 const limiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 10,
+    max: 30,
     message: 'Too many requests, please try again later',
 });
 
