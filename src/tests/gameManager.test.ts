@@ -108,10 +108,10 @@ describe('gameManager', () => {
             const p1 = createPlayer('p1', 'Alice');
             joinRoom('room-start-fail', p1);
 
-            const result = startGame('room-start-fail');
+            const result = startGame('room-start-fail', 'host1');
             expect(result).toBeNull();
 
-            const invalidResult = startGame('invalid-room');
+            const invalidResult = startGame('invalid-room', 'host1');
             expect(invalidResult).toBeNull();
         });
 
@@ -124,7 +124,7 @@ describe('gameManager', () => {
             ];
             players.forEach((p) => joinRoom('room-start', p));
 
-            const result = startGame('room-start');
+            const result = startGame('room-start', 'host1');
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('ROLE_REVEAL');
             expect(result!.impostorId).toBeDefined();
@@ -142,32 +142,33 @@ describe('gameManager', () => {
             room.turnOrder = ['p1', 'p2'];
             room.turnIndex = 0;
             room.currentTurnPlayerId = 'p1';
+            room.phase = 'DRAWING';
 
-            const r1 = nextTurn('room-turns');
+            const r1 = nextTurn('room-turns', 'p1');
             expect(r1).not.toBeNull();
             expect(r1!.currentTurnPlayerId).toBe('p2');
             expect(r1!.turnIndex).toBe(1);
 
-            const r2 = nextTurn('room-turns');
+            const r2 = nextTurn('room-turns', 'p2');
             expect(r2!.phase).toBe('VOTING');
             expect(r2!.currentTurnPlayerId).toBeNull();
         });
 
         it('should return null for non-existent room', () => {
-            expect(nextTurn('invalid')).toBeNull();
+            expect(nextTurn('invalid', 'host1')).toBeNull();
         });
     });
 
     describe('proceedToDrawing', () => {
         it('should set phase to DRAWING', () => {
             createRoom('room-proceed', 'host1');
-            const result = proceedToDrawing('room-proceed');
+            const result = proceedToDrawing('room-proceed', 'host1');
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('DRAWING');
         });
 
         it('should return null for invalid room', () => {
-            expect(proceedToDrawing('invalid')).toBeNull();
+            expect(proceedToDrawing('invalid', 'host1')).toBeNull();
         });
     });
 
@@ -265,7 +266,7 @@ describe('gameManager', () => {
             room.votes = { p1: 'p2' };
             room.turnOrder = ['p1'];
 
-            const result = playAgain('room-playagain');
+            const result = playAgain('room-playagain', 'host1');
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('LOBBY');
             expect(result!.impostorId).toBeNull();
@@ -276,7 +277,7 @@ describe('gameManager', () => {
         });
 
         it('should return null for invalid room', () => {
-            expect(playAgain('invalid')).toBeNull();
+            expect(playAgain('invalid', 'host1')).toBeNull();
         });
     });
 });

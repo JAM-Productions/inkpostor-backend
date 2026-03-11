@@ -62,9 +62,10 @@ export function leaveRoom(roomId: string, playerId: string) {
     // If no players are connected, we could delete the room after a timeout, but for MVP we just keep it
 }
 
-export function startGame(roomId: string): GameRoom | null {
+export function startGame(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
-    if (!room || room.players.length < 3) return null;
+    if (!room || room.hostId !== playerId || room.players.length < 3)
+        return null;
 
     // Pick Impostor
     const impostorIndex = Math.floor(Math.random() * room.players.length);
@@ -97,9 +98,10 @@ export function startGame(roomId: string): GameRoom | null {
     return room;
 }
 
-export function nextTurn(roomId: string): GameRoom | null {
+export function nextTurn(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
-    if (!room) return null;
+    if (!room || room.phase !== 'DRAWING') return null;
+    if (room.currentTurnPlayerId !== playerId) return null;
 
     room.turnIndex++;
     if (room.turnIndex >= room.turnOrder.length) {
@@ -135,9 +137,12 @@ export function clearCanvas(roomId: string, playerId: string): GameRoom | null {
     return room;
 }
 
-export function proceedToDrawing(roomId: string): GameRoom | null {
+export function proceedToDrawing(
+    roomId: string,
+    playerId: string
+): GameRoom | null {
     const room = rooms[roomId];
-    if (!room) return null;
+    if (!room || room.hostId !== playerId) return null;
     room.phase = 'DRAWING';
     return room;
 }
@@ -148,8 +153,10 @@ export function castVote(
     votedForId: string
 ): GameRoom | null {
     const room = rooms[roomId];
-    if (!room || room.phase !== 'VOTING') return null;
-
+    if (!room || room.phase !== 'VOTING' || voterId === votedForId) return null;
+    const isSkip = votedForId === 'skip';
+    const candidateExists = room.players.some((p) => p.id === votedForId);
+    if (!isSkip && !candidateExists) return null;
     room.votes[voterId] = votedForId;
     const voter = room.players.find((p) => p.id === voterId);
     if (voter) voter.hasVoted = true;
@@ -165,9 +172,9 @@ export function castVote(
     return room;
 }
 
-export function playAgain(roomId: string): GameRoom | null {
+export function playAgain(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
-    if (!room) return null;
+    if (!room || room.hostId !== playerId) return null;
     room.phase = 'LOBBY';
     room.impostorId = null;
     room.secretWord = null;
