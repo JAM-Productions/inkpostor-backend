@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import {
     createRoom,
     joinRoom,
@@ -27,25 +28,50 @@ if (!SECRET_KEY) {
     throw new Error('JWT_SECRET is not defined');
 }
 
+const corsOptions = {
+    origin: process.env.INKPOSTOR_FRONTEND_URL || 'http://localhost:5173',
+    methods: ['GET', 'POST'],
+};
+
+// 10 requests per minute per IP
+const limiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: 'Too many requests, please try again later',
+});
+
 const app = express();
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
+app.use('/auth', limiter);
 
 app.post('/auth', (req, res) => {
+    const origin = req.headers.origin;
+    if (origin !== corsOptions.origin) {
+        return res.status(403).json({ message: 'Forbidden' });
+    }
     const { username } = req.body;
     if (!username)
         return res.status(400).json({ message: 'Username required' });
-
-    const token = generateToken(username);
+    //Sanitize username
+    const sanitizedUsername = username.trim();
+    if (sanitizedUsername.length > 20 || sanitizedUsername.length < 3)
+        return res.status(400).json({
+            message:
+                'Invalid username. Username must be between 3 and 20 characters',
+        });
+    if (!/^[a-zA-Z0-9_]+$/.test(sanitizedUsername))
+        return res.status(400).json({
+            message:
+                'Invalid username. Username can only contain letters, numbers, and underscores',
+        });
+    const token = generateToken(sanitizedUsername);
     res.json({ token });
 });
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: process.env.INKPOSTOR_FRONTEND_URL || 'http://localhost:5173',
-        methods: ['GET', 'POST'],
-    },
+    cors: corsOptions,
 });
 
 const socketToRoom: Record<string, string> = {};
