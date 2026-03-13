@@ -1,11 +1,5 @@
 import { GameRoom, Player, StrokeData } from './types';
-import fs from 'fs';
-import path from 'path';
-
-// Load word data
-const dataPath = path.join(__dirname, 'data.json');
-const rawData = fs.readFileSync(dataPath, 'utf-8');
-const wordData = JSON.parse(rawData);
+import wordData from './data.json';
 
 const rooms: Record<string, GameRoom> = {};
 

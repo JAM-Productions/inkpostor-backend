@@ -127,11 +127,11 @@ describe('gameManager', () => {
             const result = startGame('room-start', 'host1');
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('ROLE_REVEAL');
-            expect(result!.impostorId).toBeDefined();
-            expect(result!.secretWord).toBeDefined();
-            expect(result!.secretCategory).toBeDefined();
+            expect(result!.impostorId).not.toBeNull();
+            expect(result!.secretWord).not.toBeNull();
+            expect(result!.secretCategory).not.toBeNull();
             expect(result!.turnOrder.length).toBe(3);
-            expect(result!.currentTurnPlayerId).toBeDefined();
+            expect(result!.currentTurnPlayerId).not.toBeNull();
             expect(result!.turnOrder).toContain(result!.currentTurnPlayerId);
         });
     });

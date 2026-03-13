@@ -7,7 +7,8 @@
         "dev": "nodemon src/index.ts",
         "build": "tsc",
         "start": "node dist/index.js",
-        "test": "vitest run --coverage",
+        "test": "vitest run",
+        "test:coverage": "vitest run --coverage",
         "format": "prettier --write \"src/**/*.{ts,js}\"",
         "check-format": "prettier --check \"src/**/*.{ts,js}\""
     },
@@ -23,11 +24,13 @@
         "express": "^5.2.1",
         "express-rate-limit": "^8.3.1",
         "jsonwebtoken": "^9.0.3",
+        "morgan": "^1.10.1",
         "socket.io": "^4.8.3"
     },
     "devDependencies": {
         "@types/cors": "^2.8.19",
         "@types/express": "^5.0.6",
+        "@types/morgan": "^1.9.10",
         "@types/node": "^25.3.5",
         "@vitest/coverage-v8": "^4.0.18",
         "nodemon": "^3.1.14",

@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import morgan from 'morgan';
 import {
     createRoom,
     joinRoom,
@@ -23,6 +24,7 @@ import { Player, StrokeData } from './types';
 dotenv.config();
 
 const SECRET_KEY = process.env.JWT_SECRET;
+const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '30', 10);
 
 if (!SECRET_KEY) {
     throw new Error('JWT_SECRET is not defined');
@@ -33,17 +35,24 @@ const corsOptions = {
     methods: ['GET', 'POST'],
 };
 
-// 30 requests per minute per IP
 const limiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 30,
+    max: 10,
     message: 'Too many requests, please try again later',
 });
 
 const app = express();
+app.use(morgan('combined'));
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use('/auth', limiter);
+
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'OK',
+        message: 'Inkpostor backend is running',
+    });
+});
 
 app.post('/auth', (req, res) => {
     const origin = req.headers.origin;
@@ -77,6 +86,14 @@ const io = new Server(server, {
 const socketToRoom: Record<string, string> = {};
 
 io.use((socket, next) => {
+    if (io.engine.clientsCount > MAX_CONNECTIONS) {
+        return next(
+            new Error(
+                'Connection error: Maximum concurrent connections reached'
+            )
+        );
+    }
+
     const token =
         socket.handshake.auth?.token ||
         socket.handshake.headers['authorization'];

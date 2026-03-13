@@ -2,10 +2,18 @@
 
 This is the backend service for the Inkpostor application, built with Node.js, Express, Socket.io, and TypeScript.
 
+## Features
+- Real-time multiplayer drawing via Socket.io
+- Rate limiting for authentication endpoints
+- Configurable maximum concurrent socket connections
+- HTTP request logging (Morgan)
+- Automated tested Health checks
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) installed
 - npm or yarn
+- Docker (optional, for containerization)
 
 ## Getting Started
 
@@ -15,13 +23,34 @@ This is the backend service for the Inkpostor application, built with Node.js, E
     npm install
     ```
 
-2. **Run the development server:**
+2. **Environment Variables:**
+    Create a `.env` file in the root based on your needs:
+    ```env
+    JWT_SECRET=your_secret_key
+    MAX_CONNECTIONS=30
+    ```
+
+3. **Run the development server:**
 
     ```bash
     npm run dev
     ```
 
     The development server will start using `nodemon` and auto-reload on file changes.
+
+### Running with Docker
+
+You can also run the backend using Docker:
+
+```bash
+docker build -t inkpostor-backend .
+docker run -p 3001:3001 --env-file .env inkpostor-backend
+```
+
+## API Endpoints
+
+- `GET /health` - Healthcheck endpoint (returns HTTP 200 OK)
+- `POST /auth` - Generates a JWT given a valid username within the game constraints.
 
 ## Scripts
 
