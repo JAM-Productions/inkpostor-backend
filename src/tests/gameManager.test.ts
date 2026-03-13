@@ -13,6 +13,7 @@ import {
     playAgain,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
+import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
 
 describe('gameManager', () => {
     // Helper to create basic players
@@ -78,6 +79,24 @@ describe('gameManager', () => {
             const p1 = createPlayer('p1', 'Alice');
             const result = joinRoom('room-midgame', p1);
             expect(result).toBeNull();
+        });
+
+        it('should enforce MAX_NUM_PLAYERS_PER_ROOM limit', () => {
+            createRoom('room-max-limit', 'host1');
+            // Fill the room to the max
+            for (let i = 0; i < MAX_NUM_PLAYERS_PER_ROOM; i++) {
+                const player = createPlayer(`p${i}`, `Player${i}`);
+                const room = joinRoom('room-max-limit', player);
+                expect(room).not.toBeNull();
+            }
+
+            // Try adding one more
+            const extraPlayer = createPlayer('extra', 'Extra');
+            const result = joinRoom('room-max-limit', extraPlayer);
+            expect(result).toBeNull(); // Should be rejected
+
+            const finalRoom = getRoom('room-max-limit');
+            expect(finalRoom!.players.length).toBe(MAX_NUM_PLAYERS_PER_ROOM);
         });
     });
 

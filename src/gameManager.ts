@@ -1,5 +1,6 @@
 import { GameRoom, Player, StrokeData } from './types';
 import wordData from './data.json';
+import { MAX_NUM_PLAYERS_PER_ROOM } from './constants';
 
 const rooms: Record<string, GameRoom> = {};
 
@@ -40,6 +41,9 @@ export function joinRoom(roomId: string, player: Player): GameRoom | null {
     } else {
         // Cannot join mid-game unless reconnecting
         if (room.phase !== 'LOBBY') return null;
+        // Enforce maximum players per room
+        if (room.players.length >= MAX_NUM_PLAYERS_PER_ROOM) return null;
+
         room.players.push(player);
     }
     return room;
