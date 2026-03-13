@@ -31,7 +31,7 @@ if (!SECRET_KEY) {
 }
 
 const corsOptions = {
-    origin: process.env.INKPOSTOR_FRONTEND_URL || 'http://localhost:5173',
+    origin: process.env.INKPOSTOR_FRONTEND_URL ?? 'http://localhost:5173',
     methods: ['GET', 'POST'],
 };
 
