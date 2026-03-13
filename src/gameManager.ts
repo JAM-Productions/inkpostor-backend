@@ -18,6 +18,7 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         turnIndex: 0,
         votes: {},
         canvasStrokes: [],
+        currentRound: 1,
     };
     rooms[roomId] = newRoom;
     return newRoom;
@@ -174,6 +175,7 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.hostId !== playerId) return null;
     room.phase = 'LOBBY';
+    room.currentRound = 1;
     room.impostorId = null;
     room.secretWord = null;
     room.secretCategory = null;
@@ -182,6 +184,20 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     room.turnIndex = 0;
     room.votes = {};
     room.canvasStrokes = [];
+    room.players.forEach((p) => {
+        p.hasVoted = false;
+    });
+    return room;
+}
+
+export function nextRound(roomId: string, playerId: string): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.hostId !== playerId) return null;
+    room.phase = 'DRAWING';
+    room.currentRound++;
+    room.currentTurnPlayerId = room.turnOrder[0];
+    room.turnIndex = 0;
+    room.votes = {};
     room.players.forEach((p) => {
         p.hasVoted = false;
     });

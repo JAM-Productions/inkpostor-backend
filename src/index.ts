@@ -18,6 +18,7 @@ import {
     castVote,
     playAgain,
     clearCanvas,
+    nextRound,
 } from './gameManager';
 import { Player, StrokeData } from './types';
 
@@ -232,6 +233,15 @@ io.on('connection', (socket: Socket) => {
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = playAgain(roomId, socket.id);
+        if (room) {
+            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+        }
+    });
+
+    socket.on('nextRound', () => {
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = nextRound(roomId, socket.id);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
