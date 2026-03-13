@@ -1,5 +1,6 @@
 name: Unit Component Tests
-
+env:
+    JWT_SECRET: ${{ secrets.JWT_SECRET }}
 on:
     push:
         branches: [main]
