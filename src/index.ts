@@ -268,9 +268,10 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('nextRound', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = nextRound(roomId, socket.id);
+        const room = nextRound(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
