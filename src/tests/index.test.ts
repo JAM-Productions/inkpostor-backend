@@ -50,16 +50,17 @@ describe('Server API and Socket Integration Tests', () => {
         });
 
         it('POST /auth should return a token for valid usernames', async () => {
+            const testUserId = '00000000-0000-4000-8000-000000000001';
             const response = await request(app)
                 .post('/auth')
-                .send({ username: 'valid_user', userId: 'test-uuid-1234' });
+                .send({ username: 'valid_user', userId: testUserId });
             expect(response.status).toBe(200);
             expect(response.body).toHaveProperty('token');
 
             // Verify token structure
             const payload = jwt.decode(response.body.token) as any;
             expect(payload.name).toBe('valid_user');
-            expect(payload.userId).toBe('test-uuid-1234');
+            expect(payload.userId).toBe(testUserId);
         });
 
         it('POST /auth should generate a server-side UUID when no userId is provided', async () => {
@@ -75,7 +76,7 @@ describe('Server API and Socket Integration Tests', () => {
         });
 
         it('POST /auth should use the client-provided userId, not generate a new one', async () => {
-            const myUUID = 'client-provided-uuid-abc-123';
+            const myUUID = '00000000-0000-4000-8000-000000000002';
             const response = await request(app)
                 .post('/auth')
                 .send({ username: 'uuid_user', userId: myUUID });
@@ -85,12 +86,14 @@ describe('Server API and Socket Integration Tests', () => {
         });
 
         it('POST /auth two users with same display name should get their own UUIDs', async () => {
+            const aliceUuidA = '00000000-0000-4000-8000-000000000003';
+            const aliceUuidB = '00000000-0000-4000-8000-000000000004';
             const r1 = await request(app)
                 .post('/auth')
-                .send({ username: 'Alice', userId: 'alice-uuid-room-a' });
+                .send({ username: 'Alice', userId: aliceUuidA });
             const r2 = await request(app)
                 .post('/auth')
-                .send({ username: 'Alice', userId: 'alice-uuid-room-b' });
+                .send({ username: 'Alice', userId: aliceUuidB });
 
             const p1 = jwt.decode(r1.body.token) as any;
             const p2 = jwt.decode(r2.body.token) as any;
@@ -99,8 +102,8 @@ describe('Server API and Socket Integration Tests', () => {
             expect(p2.name).toBe('Alice');
             // The UUIDs must be distinct
             expect(p1.userId).not.toBe(p2.userId);
-            expect(p1.userId).toBe('alice-uuid-room-a');
-            expect(p2.userId).toBe('alice-uuid-room-b');
+            expect(p1.userId).toBe(aliceUuidA);
+            expect(p2.userId).toBe(aliceUuidB);
         });
     });
 
@@ -112,7 +115,7 @@ describe('Server API and Socket Integration Tests', () => {
             // Get valid token for socket connections
             const res = await request(app).post('/auth').send({
                 username: 'test_socket_user',
-                userId: 'socket-uuid-5678',
+                userId: '00000000-0000-4000-8000-000000000005',
             });
             validToken = res.body.token;
         });
@@ -201,7 +204,8 @@ describe('Server API and Socket Integration Tests', () => {
             new Promise((resolve) => s.once(event, resolve));
 
         it('player id in room state should be UUID, not display name', async () => {
-            const token = await getToken('HostPlayer', 'host-uuid-inspect');
+            const hostUserId = '00000000-0000-4000-8000-000000000006';
+            const token = await getToken('HostPlayer', hostUserId);
             const hostSocket = await connectSocket(token);
             const roomId = 'uuid-id-check-room-2';
 
@@ -214,7 +218,7 @@ describe('Server API and Socket Integration Tests', () => {
 
             expect(state.roomId).toBe(roomId);
             expect(state.players.length).toBe(1);
-            expect(state.players[0].id).toBe('host-uuid-inspect');
+            expect(state.players[0].id).toBe(hostUserId);
             expect(state.players[0].name).toBe('HostPlayer');
 
             hostSocket.disconnect();
@@ -222,8 +226,14 @@ describe('Server API and Socket Integration Tests', () => {
 
         it('reconnecting player with same UUID should not create a second player slot', async () => {
             const roomId = 'uuid-reconnect-isolated-room';
-            const hostToken = await getToken('HostR', 'host-uuid-R1');
-            const playerToken = await getToken('PlayerR', 'player-uuid-R1');
+            const hostToken = await getToken(
+                'HostR',
+                '00000000-0000-4000-8000-000000000007'
+            );
+            const playerToken = await getToken(
+                'PlayerR',
+                '00000000-0000-4000-8000-000000000008'
+            );
 
             const hostSocket = await connectSocket(hostToken);
             const playerSocket = await connectSocket(playerToken);
@@ -250,7 +260,10 @@ describe('Server API and Socket Integration Tests', () => {
             await new Promise((r) => setTimeout(r, 100));
 
             // Step 4: Player reconnects with the same UUID
-            const reconnectToken = await getToken('PlayerR', 'player-uuid-R1');
+            const reconnectToken = await getToken(
+                'PlayerR',
+                '00000000-0000-4000-8000-000000000008'
+            );
             const reconnectSocket = await connectSocket(reconnectToken);
 
             const reconnectedState = waitForEvent<any>(
@@ -263,7 +276,7 @@ describe('Server API and Socket Integration Tests', () => {
             // Must stay at exactly 2 players (not 3)
             expect(state.players.length).toBe(2);
             const reconnectedPlayer = state.players.find(
-                (p: any) => p.id === 'player-uuid-R1'
+                (p: any) => p.id === '00000000-0000-4000-8000-000000000008'
             );
             expect(reconnectedPlayer).toBeDefined();
             expect(reconnectedPlayer.isConnected).toBe(true);
@@ -274,8 +287,14 @@ describe('Server API and Socket Integration Tests', () => {
 
         it('two players with same display name have separate player slots when UUIDs differ', async () => {
             const roomId = 'uuid-name-collision-isolated-room';
-            const alice1Token = await getToken('Alice', 'alice-uuid-C1');
-            const alice2Token = await getToken('Alice', 'alice-uuid-C2');
+            const alice1Token = await getToken(
+                'Alice',
+                '00000000-0000-4000-8000-000000000009'
+            );
+            const alice2Token = await getToken(
+                'Alice',
+                '00000000-0000-4000-8000-000000000010'
+            );
 
             const alice1 = await connectSocket(alice1Token);
             const alice2 = await connectSocket(alice2Token);
@@ -293,8 +312,8 @@ describe('Server API and Socket Integration Tests', () => {
             // Must have 2 distinct player entries
             expect(state.players.length).toBe(2);
             const ids = state.players.map((p: any) => p.id);
-            expect(ids).toContain('alice-uuid-C1');
-            expect(ids).toContain('alice-uuid-C2');
+            expect(ids).toContain('00000000-0000-4000-8000-000000000009');
+            expect(ids).toContain('00000000-0000-4000-8000-000000000010');
 
             alice1.disconnect();
             alice2.disconnect();

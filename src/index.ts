@@ -76,8 +76,12 @@ app.post('/auth', (req, res) => {
             message:
                 'Invalid username. Username can only contain letters, numbers, and underscores',
         });
+    const UUID_REGEX =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const persistentUserId =
-        typeof userId === 'string' && userId.length > 0 ? userId : randomUUID();
+        typeof userId === 'string' && UUID_REGEX.test(userId)
+            ? userId
+            : randomUUID();
     const token = generateToken(sanitizedUsername, persistentUserId);
     res.json({ token });
 });
@@ -88,6 +92,7 @@ const io = new Server(server, {
 });
 
 const socketToRoom: Record<string, string> = {};
+const userIdToSocketId: Record<string, string> = {};
 
 io.use((socket, next) => {
     if (io.engine.clientsCount > MAX_CONNECTIONS) {
@@ -116,6 +121,18 @@ io.use((socket, next) => {
 
 io.on('connection', (socket: Socket) => {
     console.log('User connected:', socket.id);
+    const connectingUser = (socket as any).user;
+    if (connectingUser?.userId) {
+        const prevSocketId = userIdToSocketId[connectingUser.userId];
+        if (prevSocketId && prevSocketId !== socket.id) {
+            const prevSocket = io.sockets.sockets.get(prevSocketId);
+            if (prevSocket) {
+                prevSocket.emit('error', 'Replaced by a newer connection');
+                prevSocket.disconnect(true);
+            }
+        }
+        userIdToSocketId[connectingUser.userId] = socket.id;
+    }
 
     socket.on('createRoom', ({ roomId }) => {
         const user = (socket as any).user;
@@ -129,7 +146,6 @@ io.on('connection', (socket: Socket) => {
         const room = joinRoom(roomId, player);
         if (room) {
             socket.join(roomId);
-            socket.join(user.userId); // Join user-specific room (UUID-scoped, no collisions)
             socketToRoom[socket.id] = roomId;
             io.to(roomId).emit('gameStateUpdate', room);
         }
@@ -151,7 +167,6 @@ io.on('connection', (socket: Socket) => {
         const joinedRoom = joinRoom(roomId, player);
         if (joinedRoom) {
             socket.join(roomId);
-            socket.join(user.userId); // Join user-specific room (UUID-scoped, no collisions)
             socketToRoom[socket.id] = roomId;
             io.to(roomId).emit('gameStateUpdate', joinedRoom);
         } else {
@@ -168,10 +183,12 @@ io.on('connection', (socket: Socket) => {
             // Send global state to everyone EXCEPT the secret word and impostor status
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
 
-            // Send private roles
+            // Send private roles directly to each player's socket
             room.players.forEach((p) => {
+                const targetSocketId = userIdToSocketId[p.id];
+                if (!targetSocketId) return;
                 const isImpostor = p.id === room.impostorId;
-                io.to(p.id).emit('roleAssignment', {
+                io.to(targetSocketId).emit('roleAssignment', {
                     isImpostor,
                     secretWord: isImpostor ? null : room.secretWord,
                     secretCategory: room.secretCategory,
@@ -263,6 +280,9 @@ io.on('connection', (socket: Socket) => {
                 );
             }
             delete socketToRoom[socket.id];
+        }
+        if (user?.userId && userIdToSocketId[user.userId] === socket.id) {
+            delete userIdToSocketId[user.userId];
         }
     });
 });
