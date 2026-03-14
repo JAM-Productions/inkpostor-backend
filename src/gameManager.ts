@@ -31,9 +31,9 @@ export function joinRoom(roomId: string, player: Player): GameRoom | null {
     const room = rooms[roomId];
     if (!room) return null;
 
-    // Check if player already exists (reconnecting)
+    // Check if player already exists (reconnecting via same UUID)
     const existingPlayerIndex = room.players.findIndex(
-        (p) => p.name === player.name
+        (p) => p.id === player.id
     );
     if (existingPlayerIndex >= 0) {
         room.players[existingPlayerIndex].isConnected = true;

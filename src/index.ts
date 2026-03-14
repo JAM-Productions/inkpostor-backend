@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import morgan from 'morgan';
+import { randomUUID } from 'crypto';
 import {
     createRoom,
     joinRoom,
@@ -60,7 +61,7 @@ app.post('/auth', (req, res) => {
     if (origin !== corsOptions.origin && process.env.NODE_ENV !== 'test') {
         return res.status(403).json({ message: 'Forbidden' });
     }
-    const { username } = req.body;
+    const { username, userId } = req.body;
     if (!username)
         return res.status(400).json({ message: 'Username required' });
     //Sanitize username
@@ -75,7 +76,9 @@ app.post('/auth', (req, res) => {
             message:
                 'Invalid username. Username can only contain letters, numbers, and underscores',
         });
-    const token = generateToken(sanitizedUsername);
+    const persistentUserId =
+        typeof userId === 'string' && userId.length > 0 ? userId : randomUUID();
+    const token = generateToken(sanitizedUsername, persistentUserId);
     res.json({ token });
 });
 
@@ -116,9 +119,9 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('createRoom', ({ roomId }) => {
         const user = (socket as any).user;
-        createRoom(roomId, user.name);
+        createRoom(roomId, user.userId);
         const player: Player = {
-            id: user.name,
+            id: user.userId,
             name: user.name,
             isConnected: true,
             score: 0,
@@ -126,7 +129,7 @@ io.on('connection', (socket: Socket) => {
         const room = joinRoom(roomId, player);
         if (room) {
             socket.join(roomId);
-            socket.join(user.name); // Join user-specific room
+            socket.join(user.userId); // Join user-specific room (UUID-scoped, no collisions)
             socketToRoom[socket.id] = roomId;
             io.to(roomId).emit('gameStateUpdate', room);
         }
@@ -137,10 +140,10 @@ io.on('connection', (socket: Socket) => {
         let room = getRoom(roomId);
         if (!room) {
             // Auto-create room if it doesn't exist for MVP simplicity
-            room = createRoom(roomId, user.name);
+            room = createRoom(roomId, user.userId);
         }
         const player: Player = {
-            id: user.name,
+            id: user.userId,
             name: user.name,
             isConnected: true,
             score: 0,
@@ -148,7 +151,7 @@ io.on('connection', (socket: Socket) => {
         const joinedRoom = joinRoom(roomId, player);
         if (joinedRoom) {
             socket.join(roomId);
-            socket.join(user.name); // Join user-specific room
+            socket.join(user.userId); // Join user-specific room (UUID-scoped, no collisions)
             socketToRoom[socket.id] = roomId;
             io.to(roomId).emit('gameStateUpdate', joinedRoom);
         } else {
@@ -160,7 +163,7 @@ io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = startGame(roomId, user.name);
+        const room = startGame(roomId, user.userId);
         if (room) {
             // Send global state to everyone EXCEPT the secret word and impostor status
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
@@ -181,7 +184,7 @@ io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = proceedToDrawing(roomId, user.name);
+        const room = proceedToDrawing(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
@@ -191,7 +194,7 @@ io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = addStroke(roomId, user.name, stroke);
+        const room = addStroke(roomId, user.userId, stroke);
         if (room) {
             // Broadcast stroke to others instantly for smooth drawing
             socket.to(roomId).emit('strokeUpdate', stroke);
@@ -202,7 +205,7 @@ io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = clearCanvas(roomId, user.name);
+        const room = clearCanvas(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('canvasCleared');
         }
@@ -212,7 +215,7 @@ io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = nextTurn(roomId, user.name);
+        const room = nextTurn(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
@@ -222,7 +225,7 @@ io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = castVote(roomId, user.name, votedForId);
+        const room = castVote(roomId, user.userId, votedForId);
         if (room) {
             if (room.phase === 'RESULTS') {
                 // Send full unsanitized state so everyone sees the impostor
@@ -240,7 +243,7 @@ io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = playAgain(roomId, user.name);
+        const room = playAgain(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
@@ -251,7 +254,7 @@ io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (roomId && user) {
-            leaveRoom(roomId, user.name);
+            leaveRoom(roomId, user.userId);
             const room = getRoom(roomId);
             if (room) {
                 io.to(roomId).emit(
@@ -279,18 +282,9 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     };
 }
 
-function generateToken(username: string) {
-    return jwt.sign({ name: username }, SECRET_KEY as string, {
-        expiresIn: '1h',
-    });
-}
-
-const PORT = process.env.PORT || 3001;
-
-// Only start the server if we aren't running in a test environment
-if (process.env.NODE_ENV !== 'test') {
-    server.listen(PORT, () => {
-        console.log(`Socket.IO Server running on port ${PORT}`);
+function generateToken(username: string, userId: string) {
+    return jwt.sign({ name: username, userId }, SECRET_KEY as string, {
+        expiresIn: '24h',
     });
 }
 
