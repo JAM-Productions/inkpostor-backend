@@ -116,9 +116,9 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('createRoom', ({ roomId }) => {
         const user = (socket as any).user;
-        createRoom(roomId, socket.id);
+        createRoom(roomId, user.name);
         const player: Player = {
-            id: socket.id,
+            id: user.name,
             name: user.name,
             isConnected: true,
             score: 0,
@@ -126,6 +126,7 @@ io.on('connection', (socket: Socket) => {
         const room = joinRoom(roomId, player);
         if (room) {
             socket.join(roomId);
+            socket.join(user.name); // Join user-specific room
             socketToRoom[socket.id] = roomId;
             io.to(roomId).emit('gameStateUpdate', room);
         }
@@ -136,10 +137,10 @@ io.on('connection', (socket: Socket) => {
         let room = getRoom(roomId);
         if (!room) {
             // Auto-create room if it doesn't exist for MVP simplicity
-            room = createRoom(roomId, socket.id);
+            room = createRoom(roomId, user.name);
         }
         const player: Player = {
-            id: socket.id,
+            id: user.name,
             name: user.name,
             isConnected: true,
             score: 0,
@@ -147,6 +148,7 @@ io.on('connection', (socket: Socket) => {
         const joinedRoom = joinRoom(roomId, player);
         if (joinedRoom) {
             socket.join(roomId);
+            socket.join(user.name); // Join user-specific room
             socketToRoom[socket.id] = roomId;
             io.to(roomId).emit('gameStateUpdate', joinedRoom);
         } else {
@@ -155,9 +157,10 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('startGame', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = startGame(roomId, socket.id);
+        const room = startGame(roomId, user.name);
         if (room) {
             // Send global state to everyone EXCEPT the secret word and impostor status
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
@@ -175,18 +178,20 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('proceedToDrawing', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = proceedToDrawing(roomId, socket.id);
+        const room = proceedToDrawing(roomId, user.name);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
     });
 
     socket.on('drawStroke', (stroke: StrokeData) => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = addStroke(roomId, socket.id, stroke);
+        const room = addStroke(roomId, user.name, stroke);
         if (room) {
             // Broadcast stroke to others instantly for smooth drawing
             socket.to(roomId).emit('strokeUpdate', stroke);
@@ -194,27 +199,30 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('clearCanvas', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = clearCanvas(roomId, socket.id);
+        const room = clearCanvas(roomId, user.name);
         if (room) {
             io.to(roomId).emit('canvasCleared');
         }
     });
 
     socket.on('endTurn', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = nextTurn(roomId, socket.id);
+        const room = nextTurn(roomId, user.name);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
     });
 
     socket.on('vote', (votedForId: string) => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = castVote(roomId, socket.id, votedForId);
+        const room = castVote(roomId, user.name, votedForId);
         if (room) {
             if (room.phase === 'RESULTS') {
                 // Send full unsanitized state so everyone sees the impostor
@@ -229,9 +237,10 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('playAgain', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = playAgain(roomId, socket.id);
+        const room = playAgain(roomId, user.name);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
@@ -239,9 +248,10 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
-        if (roomId) {
-            leaveRoom(roomId, socket.id);
+        if (roomId && user) {
+            leaveRoom(roomId, user.name);
             const room = getRoom(roomId);
             if (room) {
                 io.to(roomId).emit(

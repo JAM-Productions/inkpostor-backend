@@ -58,17 +58,18 @@ describe('gameManager', () => {
             expect(room).toBeNull();
         });
 
-        it('should allow reconnection with new socket id (based on id or name)', () => {
+        it('should allow reconnection with the same name', () => {
             createRoom('room-reconnect', 'host1');
-            const p1 = createPlayer('p1', 'Alice');
+            const p1 = createPlayer('Alice', 'Alice');
             joinRoom('room-reconnect', p1);
 
-            // Reconnect with new id but same name
-            const p1Reconnect = createPlayer('p1-new', 'Alice');
+            // Reconnect with same name
+            const p1Reconnect = createPlayer('Alice', 'Alice');
+            p1Reconnect.isConnected = false; // Intentionally set to flip back
             const room = joinRoom('room-reconnect', p1Reconnect);
 
             expect(room!.players.length).toBe(1);
-            expect(room!.players[0].id).toBe('p1-new');
+            expect(room!.players[0].id).toBe('Alice');
             expect(room!.players[0].isConnected).toBe(true);
         });
 

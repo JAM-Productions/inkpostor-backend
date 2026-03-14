@@ -33,11 +33,10 @@ export function joinRoom(roomId: string, player: Player): GameRoom | null {
 
     // Check if player already exists (reconnecting)
     const existingPlayerIndex = room.players.findIndex(
-        (p) => p.id === player.id || p.name === player.name
+        (p) => p.name === player.name
     );
     if (existingPlayerIndex >= 0) {
         room.players[existingPlayerIndex].isConnected = true;
-        room.players[existingPlayerIndex].id = player.id; // Update socket id
     } else {
         // Cannot join mid-game unless reconnecting
         if (room.phase !== 'LOBBY') return null;
