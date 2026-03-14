@@ -110,12 +110,10 @@ describe('Server API and Socket Integration Tests', () => {
 
         beforeAll(async () => {
             // Get valid token for socket connections
-            const res = await request(app)
-                .post('/auth')
-                .send({
-                    username: 'test_socket_user',
-                    userId: 'socket-uuid-5678',
-                });
+            const res = await request(app).post('/auth').send({
+                username: 'test_socket_user',
+                userId: 'socket-uuid-5678',
+            });
             validToken = res.body.token;
         });
 
