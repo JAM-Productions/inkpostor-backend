@@ -58,18 +58,54 @@ describe('gameManager', () => {
             expect(room).toBeNull();
         });
 
-        it('should allow reconnection with new socket id (based on id or name)', () => {
+        it('should allow reconnection with the same UUID (id match)', () => {
             createRoom('room-reconnect', 'host1');
-            const p1 = createPlayer('p1', 'Alice');
+            const p1 = createPlayer('uuid-persistent-id', 'Alice');
             joinRoom('room-reconnect', p1);
 
-            // Reconnect with new id but same name
-            const p1Reconnect = createPlayer('p1-new', 'Alice');
+            // Simulate reconnect: same UUID, player was marked disconnected
+            const p1Reconnect = createPlayer('uuid-persistent-id', 'Alice');
+            p1Reconnect.isConnected = false;
             const room = joinRoom('room-reconnect', p1Reconnect);
 
+            // Must still be 1 player (not duplicated)
             expect(room!.players.length).toBe(1);
-            expect(room!.players[0].id).toBe('p1-new');
+            expect(room!.players[0].id).toBe('uuid-persistent-id');
             expect(room!.players[0].isConnected).toBe(true);
+        });
+
+        it('should NOT merge two players with the same name but different UUIDs', () => {
+            createRoom('room-name-collision', 'host1');
+            const p1 = createPlayer('uuid-alice-aaa', 'Alice');
+            const p2 = createPlayer('uuid-alice-bbb', 'Alice');
+
+            joinRoom('room-name-collision', p1);
+            const room = joinRoom('room-name-collision', p2);
+
+            // Both should exist as separate players
+            expect(room!.players.length).toBe(2);
+            const ids = room!.players.map((p) => p.id);
+            expect(ids).toContain('uuid-alice-aaa');
+            expect(ids).toContain('uuid-alice-bbb');
+        });
+
+        it('should allow a UUID-matched player to rejoin mid-game', () => {
+            const room = createRoom('room-midgame-rejoin', 'host1');
+            const p1 = createPlayer('uuid-midgame-id', 'Alice');
+            joinRoom('room-midgame-rejoin', p1);
+
+            // Force game to an in-progress phase
+            room.phase = 'DRAWING';
+
+            // Mark the player as disconnected (they dropped)
+            room.players[0].isConnected = false;
+
+            // They should be allowed back (UUID already in room, just reconnecting)
+            const p1Reconnect = createPlayer('uuid-midgame-id', 'Alice');
+            const result = joinRoom('room-midgame-rejoin', p1Reconnect);
+
+            expect(result).not.toBeNull();
+            expect(result!.players[0].isConnected).toBe(true);
         });
 
         it('should not allow joining mid-game if new player', () => {

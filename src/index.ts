@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import morgan from 'morgan';
+import { randomUUID } from 'crypto';
 import {
     createRoom,
     joinRoom,
@@ -60,7 +61,7 @@ app.post('/auth', (req, res) => {
     if (origin !== corsOptions.origin && process.env.NODE_ENV !== 'test') {
         return res.status(403).json({ message: 'Forbidden' });
     }
-    const { username } = req.body;
+    const { username, userId } = req.body;
     if (!username)
         return res.status(400).json({ message: 'Username required' });
     //Sanitize username
@@ -75,7 +76,13 @@ app.post('/auth', (req, res) => {
             message:
                 'Invalid username. Username can only contain letters, numbers, and underscores',
         });
-    const token = generateToken(sanitizedUsername);
+    const UUID_REGEX =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const persistentUserId =
+        typeof userId === 'string' && UUID_REGEX.test(userId)
+            ? userId
+            : randomUUID();
+    const token = generateToken(sanitizedUsername, persistentUserId);
     res.json({ token });
 });
 
@@ -85,6 +92,7 @@ const io = new Server(server, {
 });
 
 const socketToRoom: Record<string, string> = {};
+const userIdToSocketId: Record<string, string> = {};
 
 io.use((socket, next) => {
     if (io.engine.clientsCount > MAX_CONNECTIONS) {
@@ -113,12 +121,24 @@ io.use((socket, next) => {
 
 io.on('connection', (socket: Socket) => {
     console.log('User connected:', socket.id);
+    const connectingUser = (socket as any).user;
+    if (connectingUser?.userId) {
+        const prevSocketId = userIdToSocketId[connectingUser.userId];
+        if (prevSocketId && prevSocketId !== socket.id) {
+            const prevSocket = io.sockets.sockets.get(prevSocketId);
+            if (prevSocket) {
+                prevSocket.emit('error', 'Replaced by a newer connection');
+                prevSocket.disconnect(true);
+            }
+        }
+        userIdToSocketId[connectingUser.userId] = socket.id;
+    }
 
     socket.on('createRoom', ({ roomId }) => {
         const user = (socket as any).user;
-        createRoom(roomId, socket.id);
+        createRoom(roomId, user.userId);
         const player: Player = {
-            id: socket.id,
+            id: user.userId,
             name: user.name,
             isConnected: true,
             score: 0,
@@ -136,10 +156,10 @@ io.on('connection', (socket: Socket) => {
         let room = getRoom(roomId);
         if (!room) {
             // Auto-create room if it doesn't exist for MVP simplicity
-            room = createRoom(roomId, socket.id);
+            room = createRoom(roomId, user.userId);
         }
         const player: Player = {
-            id: socket.id,
+            id: user.userId,
             name: user.name,
             isConnected: true,
             score: 0,
@@ -155,17 +175,20 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('startGame', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = startGame(roomId, socket.id);
+        const room = startGame(roomId, user.userId);
         if (room) {
             // Send global state to everyone EXCEPT the secret word and impostor status
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
 
-            // Send private roles
+            // Send private roles directly to each player's socket
             room.players.forEach((p) => {
+                const targetSocketId = userIdToSocketId[p.id];
+                if (!targetSocketId) return;
                 const isImpostor = p.id === room.impostorId;
-                io.to(p.id).emit('roleAssignment', {
+                io.to(targetSocketId).emit('roleAssignment', {
                     isImpostor,
                     secretWord: isImpostor ? null : room.secretWord,
                     secretCategory: room.secretCategory,
@@ -175,18 +198,20 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('proceedToDrawing', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = proceedToDrawing(roomId, socket.id);
+        const room = proceedToDrawing(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
     });
 
     socket.on('drawStroke', (stroke: StrokeData) => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = addStroke(roomId, socket.id, stroke);
+        const room = addStroke(roomId, user.userId, stroke);
         if (room) {
             // Broadcast stroke to others instantly for smooth drawing
             socket.to(roomId).emit('strokeUpdate', stroke);
@@ -194,27 +219,30 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('clearCanvas', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = clearCanvas(roomId, socket.id);
+        const room = clearCanvas(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('canvasCleared');
         }
     });
 
     socket.on('endTurn', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = nextTurn(roomId, socket.id);
+        const room = nextTurn(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
     });
 
     socket.on('vote', (votedForId: string) => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = castVote(roomId, socket.id, votedForId);
+        const room = castVote(roomId, user.userId, votedForId);
         if (room) {
             if (room.phase === 'RESULTS') {
                 // Send full unsanitized state so everyone sees the impostor
@@ -229,9 +257,10 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('playAgain', () => {
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = playAgain(roomId, socket.id);
+        const room = playAgain(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
@@ -239,9 +268,10 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
+        const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
-        if (roomId) {
-            leaveRoom(roomId, socket.id);
+        if (roomId && user) {
+            leaveRoom(roomId, user.userId);
             const room = getRoom(roomId);
             if (room) {
                 io.to(roomId).emit(
@@ -250,6 +280,9 @@ io.on('connection', (socket: Socket) => {
                 );
             }
             delete socketToRoom[socket.id];
+        }
+        if (user?.userId && userIdToSocketId[user.userId] === socket.id) {
+            delete userIdToSocketId[user.userId];
         }
     });
 });
@@ -269,18 +302,9 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     };
 }
 
-function generateToken(username: string) {
-    return jwt.sign({ name: username }, SECRET_KEY as string, {
-        expiresIn: '1h',
-    });
-}
-
-const PORT = process.env.PORT || 3001;
-
-// Only start the server if we aren't running in a test environment
-if (process.env.NODE_ENV !== 'test') {
-    server.listen(PORT, () => {
-        console.log(`Socket.IO Server running on port ${PORT}`);
+function generateToken(username: string, userId: string) {
+    return jwt.sign({ name: username, userId }, SECRET_KEY as string, {
+        expiresIn: '24h',
     });
 }
 

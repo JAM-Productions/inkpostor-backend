@@ -36,7 +36,7 @@ This is the backend service for the Inkpostor application, built with Node.js, E
     npm run dev
     ```
 
-    The development server will start using `nodemon` and auto-reload on file changes.
+    The development server will start using Node's native `--watch` mode and auto-reload on file changes.
 
 ### Running with Docker
 
@@ -54,7 +54,7 @@ docker run -p 3001:3001 --env-file .env inkpostor-backend
 
 ## Scripts
 
-- `npm run dev` - Starts the development server using nodemon.
+- `npm run dev` - Starts the development server using Node native watch mode.
 - `npm run build` - Transpiles the TypeScript code to JavaScript.
 - `npm run start` - Runs the built JavaScript application.
 - `npm run test` - Runs the tests using Vitest.
