@@ -33,6 +33,7 @@ export interface GameRoom {
     turnIndex: number;
     votes: Record<string, string>; // Voter ID -> Voted Player ID (or 'skip')
     canvasStrokes: StrokeData[];
+    currentRound: number;
 }
 
 export interface WordList {

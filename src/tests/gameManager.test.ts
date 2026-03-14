@@ -11,6 +11,7 @@ import {
     proceedToDrawing,
     castVote,
     playAgain,
+    nextRound,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
@@ -333,6 +334,32 @@ describe('gameManager', () => {
 
         it('should return null for invalid room', () => {
             expect(playAgain('invalid', 'host1')).toBeNull();
+        });
+    });
+
+    describe('nextRound', () => {
+        it('should reset state correctly', () => {
+            const room = createRoom('room-nextround', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            p1.hasVoted = true;
+            joinRoom('room-nextround', p1);
+
+            room.phase = 'RESULTS';
+            room.currentRound = 1;
+            room.votes = { p1: 'p2' };
+            room.turnOrder = ['p1'];
+
+            const result = nextRound('room-nextround', 'host1');
+            expect(result).not.toBeNull();
+            expect(result!.phase).toBe('DRAWING');
+            expect(result!.currentRound).toBe(2);
+            expect(result!.votes).toEqual({});
+            expect(result!.turnOrder).toEqual(['p1']);
+            expect(result!.players[0].hasVoted).toBe(false);
+        });
+
+        it('should return null for invalid room', () => {
+            expect(nextRound('invalid', 'host1')).toBeNull();
         });
     });
 });
