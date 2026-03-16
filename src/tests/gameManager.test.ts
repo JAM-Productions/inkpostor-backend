@@ -195,6 +195,11 @@ describe('gameManager', () => {
     describe('nextTurn', () => {
         it('should progress turns and switch to VOTING when done', () => {
             const room = createRoom('room-turns', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('room-turns', p1);
+            joinRoom('room-turns', p2);
+
             room.turnOrder = ['p1', 'p2'];
             room.turnIndex = 0;
             room.currentTurnPlayerId = 'p1';
@@ -212,6 +217,21 @@ describe('gameManager', () => {
 
         it('should return null for non-existent room', () => {
             expect(nextTurn('invalid', 'host1')).toBeNull();
+        });
+
+        it('should return null if the player is ejected', () => {
+            const room = createRoom('room-turns-ejected', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            p1.isEjected = true;
+            joinRoom('room-turns-ejected', p1);
+
+            room.turnOrder = ['p1'];
+            room.turnIndex = 0;
+            room.currentTurnPlayerId = 'p1';
+            room.phase = 'DRAWING';
+
+            const r1 = nextTurn('room-turns-ejected', 'p1');
+            expect(r1).toBeNull();
         });
     });
 
@@ -277,6 +297,25 @@ describe('gameManager', () => {
             expect(addStroke('invalid', 'host1', stroke)).toBeNull();
             expect(clearCanvas('invalid', 'host1')).toBeNull();
         });
+
+        it('should return null if the player is ejected', () => {
+            const room = createRoom('room-stroke-ejected', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            p1.isEjected = true;
+            joinRoom('room-stroke-ejected', p1);
+
+            room.phase = 'DRAWING';
+            room.currentTurnPlayerId = 'p1';
+
+            const stroke: StrokeData = {
+                x: 0,
+                y: 0,
+                color: '#000',
+                isNewStroke: true,
+            };
+            expect(addStroke('room-stroke-ejected', 'p1', stroke)).toBeNull();
+            expect(clearCanvas('room-stroke-ejected', 'p1')).toBeNull();
+        });
     });
 
     describe('castVote', () => {
@@ -306,6 +345,64 @@ describe('gameManager', () => {
 
             const r2 = castVote('invalid', 'p1', 'p2');
             expect(r2).toBeNull();
+        });
+
+        it('should return null if the voter is ejected', () => {
+            const room = createRoom('room-voting-ejected-voter', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            p1.isEjected = true;
+            joinRoom('room-voting-ejected-voter', p1);
+            joinRoom('room-voting-ejected-voter', p2);
+
+            room.phase = 'VOTING';
+
+            const r1 = castVote('room-voting-ejected-voter', 'p1', 'p2');
+            expect(r1).toBeNull();
+        });
+
+        it('should return null if the voted player is ejected (unless skip)', () => {
+            const room = createRoom('room-voting-ejected-target', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            p2.isEjected = true;
+            joinRoom('room-voting-ejected-target', p1);
+            joinRoom('room-voting-ejected-target', p2);
+
+            room.phase = 'VOTING';
+
+            const r1 = castVote('room-voting-ejected-target', 'p1', 'p2');
+            expect(r1).toBeNull();
+
+            // Should allow skip
+            const r2 = castVote('room-voting-ejected-target', 'p1', 'skip');
+            expect(r2).not.toBeNull();
+            expect(r2!.phase).toBe('RESULTS'); // Since p2 is ejected, p1 voting skip completes the voting
+            expect(r2!.ejectedId).toBeNull();
+        });
+
+        it('should only require votes from non-ejected connected players to complete voting & handle ties', () => {
+            const room = createRoom('room-voting-majority', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+
+            p3.isEjected = true;
+
+            joinRoom('room-voting-majority', p1);
+            joinRoom('room-voting-majority', p2);
+            joinRoom('room-voting-majority', p3);
+
+            room.phase = 'VOTING';
+
+            const r1 = castVote('room-voting-majority', 'p1', 'p2');
+            expect(r1!.phase).toBe('VOTING');
+
+            // Voting should be complete now, p3's vote is not needed
+            const r2 = castVote('room-voting-majority', 'p2', 'p1');
+            expect(r2!.phase).toBe('RESULTS');
+            // Tie should result in null ejectedId
+            expect(r2!.ejectedId).toBeNull();
         });
     });
 
@@ -360,6 +457,24 @@ describe('gameManager', () => {
 
         it('should return null for invalid room', () => {
             expect(nextRound('invalid', 'host1')).toBeNull();
+        });
+
+        it('should filter out ejected players from the turn order', () => {
+            const room = createRoom('room-nextround-ejected', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            p2.isEjected = true;
+            joinRoom('room-nextround-ejected', p1);
+            joinRoom('room-nextround-ejected', p2);
+
+            room.phase = 'RESULTS';
+            room.currentRound = 1;
+            room.turnOrder = ['p1', 'p2'];
+
+            const result = nextRound('room-nextround-ejected', 'host1');
+            expect(result).not.toBeNull();
+            expect(result!.turnOrder).toEqual(['p1']);
+            expect(result!.currentTurnPlayerId).toBe('p1');
         });
     });
 });

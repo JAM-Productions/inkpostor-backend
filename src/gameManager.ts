@@ -171,7 +171,9 @@ export function castVote(
     voter.hasVoted = true;
 
     // Check if everyone has voted
-    const totalConnected = room.players.filter((p) => p.isConnected && !p.isEjected).length;
+    const totalConnected = room.players.filter(
+        (p) => p.isConnected && !p.isEjected
+    ).length;
     const totalVotesCast = Object.keys(room.votes).length;
 
     if (totalVotesCast >= totalConnected && totalConnected > 0) {
@@ -194,7 +196,7 @@ export function castVote(
             }
         });
 
-        if (isTie || ejectedId === "skip"){
+        if (isTie || ejectedId === 'skip') {
             room.ejectedId = null;
         } else {
             room.ejectedId = ejectedId;
