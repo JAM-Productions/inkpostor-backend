@@ -11,6 +11,7 @@ export interface Player {
     isConnected: boolean;
     score: number;
     hasVoted?: boolean;
+    isEjected?: boolean;
 }
 
 export interface StrokeData {
@@ -34,6 +35,7 @@ export interface GameRoom {
     votes: Record<string, string>; // Voter ID -> Voted Player ID (or 'skip')
     canvasStrokes: StrokeData[];
     currentRound: number;
+    ejectedId: string | null;
 }
 
 export interface WordList {
