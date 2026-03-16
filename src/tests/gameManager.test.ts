@@ -12,6 +12,7 @@ import {
     castVote,
     playAgain,
     nextRound,
+    ejectPlayer,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
@@ -360,6 +361,175 @@ describe('gameManager', () => {
 
         it('should return null for invalid room', () => {
             expect(nextRound('invalid', 'host1')).toBeNull();
+        });
+    });
+
+    describe('ejectPlayer', () => {
+        it('should eject a player in LOBBY phase', () => {
+            createRoom('room-eject-lobby', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('room-eject-lobby', p1);
+            joinRoom('room-eject-lobby', p2);
+
+            const result = ejectPlayer('room-eject-lobby', 'host1', 'p1');
+            expect(result).not.toBeNull();
+            expect(result!.players.length).toBe(1);
+            expect(result!.players[0].id).toBe('p2');
+        });
+
+        it('should eject current drawer in DRAWING phase and advance turn', () => {
+            const room = createRoom('room-eject-drawing', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            const p4 = createPlayer('p4', 'Dan');
+            joinRoom('room-eject-drawing', p1);
+            joinRoom('room-eject-drawing', p2);
+            joinRoom('room-eject-drawing', p3);
+            joinRoom('room-eject-drawing', p4);
+
+            room.phase = 'DRAWING';
+            room.turnOrder = ['p1', 'p2', 'p3', 'p4'];
+            room.turnIndex = 0;
+            room.currentTurnPlayerId = 'p1';
+
+            const result = ejectPlayer('room-eject-drawing', 'host1', 'p1');
+            expect(result!.currentTurnPlayerId).toBe('p2');
+            expect(result!.turnOrder).toEqual(['p2', 'p3', 'p4']);
+            expect(result!.turnIndex).toBe(0);
+        });
+
+        it('should eject last drawer in DRAWING phase and transition to VOTING', () => {
+            const room = createRoom('room-eject-last', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            const p4 = createPlayer('p4', 'Dan');
+            joinRoom('room-eject-last', p1);
+            joinRoom('room-eject-last', p2);
+            joinRoom('room-eject-last', p3);
+            joinRoom('room-eject-last', p4);
+
+            room.phase = 'DRAWING';
+            room.turnOrder = ['p1', 'p2', 'p3', 'p4'];
+            room.turnIndex = 3;
+            room.currentTurnPlayerId = 'p4';
+
+            const result = ejectPlayer('room-eject-last', 'host1', 'p4');
+            expect(result!.phase).toBe('VOTING');
+            expect(result!.currentTurnPlayerId).toBeNull();
+            expect(result!.turnOrder).toEqual(['p1', 'p2', 'p3']);
+        });
+
+        it('should eject a non-drawer in DRAWING phase and adjust turnIndex if needed', () => {
+            const room = createRoom('room-eject-nondrawer', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            const p4 = createPlayer('p4', 'Dan');
+            joinRoom('room-eject-nondrawer', p1);
+            joinRoom('room-eject-nondrawer', p2);
+            joinRoom('room-eject-nondrawer', p3);
+            joinRoom('room-eject-nondrawer', p4);
+
+            room.phase = 'DRAWING';
+            room.turnOrder = ['p1', 'p2', 'p3', 'p4'];
+            room.turnIndex = 1;
+            room.currentTurnPlayerId = 'p2';
+
+            const result = ejectPlayer('room-eject-nondrawer', 'host1', 'p1');
+            expect(result!.currentTurnPlayerId).toBe('p2');
+            expect(result!.turnOrder).toEqual(['p2', 'p3', 'p4']);
+            expect(result!.turnIndex).toBe(0);
+        });
+
+        it('should eject impostor and transition to RESULTS', () => {
+            const room = createRoom('room-eject-impostor', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            joinRoom('room-eject-impostor', p1);
+            joinRoom('room-eject-impostor', p2);
+            joinRoom('room-eject-impostor', p3);
+
+            room.phase = 'DRAWING';
+            room.impostorId = 'p1';
+
+            const result = ejectPlayer('room-eject-impostor', 'host1', 'p1');
+            expect(result!.phase).toBe('RESULTS');
+        });
+
+        it('should transition to RESULTS even if < 3 players if VOTING completes', () => {
+            const room = createRoom('room-eject-voting-small', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            joinRoom('room-eject-voting-small', p1);
+            joinRoom('room-eject-voting-small', p2);
+            joinRoom('room-eject-voting-small', p3);
+
+            room.phase = 'VOTING';
+            room.votes = {
+                p1: 'p3',
+                p3: 'p1'
+            };
+            room.players.find(p => p.id === 'p1')!.hasVoted = true;
+            room.players.find(p => p.id === 'p3')!.hasVoted = true;
+            room.players.forEach(p => p.isConnected = true);
+
+            // Alice(p1, host, voted), Bob(p2, connected, NOT voted), Charlie(p3, voted).
+            // Eject Bob(p2).
+            const result = ejectPlayer('room-eject-voting-small', 'host1', 'p2');
+            expect(result).not.toBeNull();
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.players.length).toBe(2);
+        });
+
+        it('should revert to LOBBY if players fall below 3 and not in RESULTS', () => {
+            const room = createRoom('room-eject-under3', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            joinRoom('room-eject-under3', p1);
+            joinRoom('room-eject-under3', p2);
+            joinRoom('room-eject-under3', p3);
+
+            room.phase = 'DRAWING';
+
+            const result = ejectPlayer('room-eject-under3', 'host1', 'p1');
+            expect(result!.phase).toBe('LOBBY');
+            expect(result!.players.length).toBe(2);
+        });
+
+        it('should reset votes cast FOR the ejected player', () => {
+            const room = createRoom('room-eject-votedfor', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            const p4 = createPlayer('p4', 'Dan');
+            joinRoom('room-eject-votedfor', p1);
+            joinRoom('room-eject-votedfor', p2);
+            joinRoom('room-eject-votedfor', p3);
+            joinRoom('room-eject-votedfor', p4);
+
+            room.phase = 'VOTING';
+            room.votes = {
+                p1: 'p2',
+                p3: 'p2',
+                p4: 'p1'
+            };
+            room.players.find(p => p.id === 'p1')!.hasVoted = true;
+            room.players.find(p => p.id === 'p3')!.hasVoted = true;
+            room.players.find(p => p.id === 'p4')!.hasVoted = true;
+
+            const result = ejectPlayer('room-eject-votedfor', 'host1', 'p2');
+            expect(result!.votes['p1']).toBeUndefined();
+            expect(result!.votes['p3']).toBeUndefined();
+            expect(result!.votes['p4']).toBe('p1');
+            expect(result!.players.find(p => p.id === 'p1')!.hasVoted).toBe(false);
+            expect(result!.players.find(p => p.id === 'p3')!.hasVoted).toBe(false);
+            expect(result!.players.find(p => p.id === 'p4')!.hasVoted).toBe(true);
         });
     });
 });

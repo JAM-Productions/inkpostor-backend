@@ -189,6 +189,90 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     return room;
 }
 
+export function ejectPlayer(
+    roomId: string,
+    hostId: string,
+    playerIdToEject: string
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.hostId !== hostId || hostId === playerIdToEject)
+        return null;
+
+    const playerIndex = room.players.findIndex((p) => p.id === playerIdToEject);
+    if (playerIndex === -1) return null;
+
+    // Remove player
+    room.players.splice(playerIndex, 1);
+
+    if (room.phase !== 'LOBBY') {
+        // If the ejected player was the impostor, game ends
+        if (room.impostorId === playerIdToEject) {
+            room.phase = 'RESULTS';
+        }
+
+        // Only handle turn/voting logic if we're not in RESULTS now (or if we were already in it)
+        if (room.phase !== 'RESULTS') {
+            const turnOrderIndex = room.turnOrder.indexOf(playerIdToEject);
+            if (turnOrderIndex !== -1) {
+                room.turnOrder.splice(turnOrderIndex, 1);
+
+                if (room.currentTurnPlayerId === playerIdToEject) {
+                    if (room.turnIndex >= room.turnOrder.length) {
+                        if (room.phase === 'DRAWING') {
+                            room.phase = 'VOTING';
+                        }
+                        room.currentTurnPlayerId = null;
+                    } else {
+                        room.currentTurnPlayerId =
+                            room.turnOrder[room.turnIndex];
+                    }
+                } else if (turnOrderIndex < room.turnIndex) {
+                    room.turnIndex--;
+                }
+            }
+
+            // Voting Cleanup
+            delete room.votes[playerIdToEject];
+            room.players.forEach((p) => {
+                if (room.votes[p.id] === playerIdToEject) {
+                    delete room.votes[p.id];
+                    p.hasVoted = false;
+                }
+            });
+
+            // Re-evaluate voting phase completion
+            if (room.phase === 'VOTING') {
+                const totalConnected = room.players.filter(
+                    (p) => p.isConnected
+                ).length;
+                const totalVotesCast = Object.keys(room.votes).length;
+
+                if (totalVotesCast >= totalConnected && totalConnected > 0) {
+                    room.phase = 'RESULTS';
+                }
+            }
+
+            // Enforce minimum player count
+            if (room.players.length < 3 && room.phase !== 'RESULTS') {
+                room.phase = 'LOBBY';
+                room.impostorId = null;
+                room.secretWord = null;
+                room.secretCategory = null;
+                room.currentTurnPlayerId = null;
+                room.turnOrder = [];
+                room.turnIndex = 0;
+                room.votes = {};
+                room.canvasStrokes = [];
+                room.players.forEach((p) => {
+                    p.hasVoted = false;
+                });
+            }
+        }
+    }
+
+    return room;
+}
+
 export function nextRound(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.hostId !== playerId) return null;

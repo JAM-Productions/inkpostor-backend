@@ -20,6 +20,7 @@ import {
     playAgain,
     clearCanvas,
     nextRound,
+    ejectPlayer,
 } from './gameManager';
 import { Player, StrokeData } from './types';
 
@@ -273,6 +274,25 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = nextRound(roomId, user.userId);
         if (room) {
+            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+        }
+    });
+
+    socket.on('ejectPlayer', ({ playerIdToEject }) => {
+        const user = (socket as any).user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = ejectPlayer(roomId, user.userId, playerIdToEject);
+        if (room) {
+            const ejectedSocketId = userIdToSocketId[playerIdToEject];
+            if (ejectedSocketId) {
+                const ejectedSocket = io.sockets.sockets.get(ejectedSocketId);
+                if (ejectedSocket) {
+                    ejectedSocket.emit('ejected');
+                    ejectedSocket.leave(roomId);
+                }
+                delete socketToRoom[ejectedSocketId];
+            }
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
     });
