@@ -14,7 +14,15 @@
                 "Bear",
                 "Monkey",
                 "Dolphin",
-                "Whale"
+                "Whale",
+                "Rabbit",
+                "Wolf",
+                "Zebra",
+                "Snake",
+                "Shark",
+                "Horse",
+                "Octopus",
+                "Eagle"
             ]
         },
         {
@@ -31,7 +39,15 @@
                 "Waffle",
                 "Donut",
                 "Avocado",
-                "Watermelon"
+                "Watermelon",
+                "Burrito",
+                "Steak",
+                "Salad",
+                "Pasta",
+                "Cake",
+                "Cookie",
+                "Apple",
+                "Banana"
             ]
         },
         {
@@ -48,7 +64,15 @@
                 "Lamp",
                 "Clock",
                 "Camera",
-                "Guitar"
+                "Guitar",
+                "Hammer",
+                "Screwdriver",
+                "Mirror",
+                "Backpack",
+                "Umbrella",
+                "Keyboard",
+                "Mouse",
+                "Notebook"
             ]
         },
         {
@@ -65,7 +89,115 @@
                 "City",
                 "Village",
                 "Airport",
-                "Train Station"
+                "Train Station",
+                "Museum",
+                "Cinema",
+                "Bakery",
+                "Gym",
+                "Stadium",
+                "Desert",
+                "Island",
+                "Office"
+            ]
+        },
+        {
+            "name": "Professions",
+            "words": [
+                "Doctor",
+                "Teacher",
+                "Engineer",
+                "Artist",
+                "Chef",
+                "Pilot",
+                "Firefighter",
+                "Police Officer",
+                "Nurse",
+                "Scientist",
+                "Lawyer",
+                "Actor",
+                "Farmer",
+                "Carpenter",
+                "Electrician",
+                "Plumber",
+                "Librarian",
+                "Photographer",
+                "Journalist",
+                "Waiter"
+            ]
+        },
+        {
+            "name": "Sports",
+            "words": [
+                "Soccer",
+                "Basketball",
+                "Tennis",
+                "Baseball",
+                "Volleyball",
+                "Swimming",
+                "Golf",
+                "Running",
+                "Boxing",
+                "Wrestling",
+                "Skiing",
+                "Snowboarding",
+                "Cycling",
+                "Archery",
+                "Fencing",
+                "Cricket",
+                "Rugby",
+                "Hockey",
+                "Surfing",
+                "Skateboarding"
+            ]
+        },
+        {
+            "name": "Nature",
+            "words": [
+                "Tree",
+                "Flower",
+                "River",
+                "Lake",
+                "Ocean",
+                "Cloud",
+                "Sun",
+                "Moon",
+                "Star",
+                "Rain",
+                "Snow",
+                "Wind",
+                "Storm",
+                "Volcano",
+                "Canyon",
+                "Cave",
+                "Waterfall",
+                "Rainbow",
+                "Grass",
+                "Leaf"
+            ]
+        },
+        {
+            "name": "Clothing",
+            "words": [
+                "Shirt",
+                "Pants",
+                "Dress",
+                "Jacket",
+                "Hat",
+                "Socks",
+                "Shoes",
+                "Boots",
+                "Scarf",
+                "Gloves",
+                "Skirt",
+                "Sweater",
+                "Tie",
+                "Belt",
+                "Glasses",
+                "Watch",
+                "Suit",
+                "Pajamas",
+                "Swimsuit",
+                "Coat"
             ]
         }
     ]
