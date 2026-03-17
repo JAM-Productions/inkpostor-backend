@@ -93,6 +93,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
         p.hasVoted = false;
         p.isEjected = false;
     });
+    room.ejectedId = null;
 
     room.phase = 'ROLE_REVEAL';
     return room;
@@ -239,7 +240,11 @@ export function nextRound(roomId: string, playerId: string): GameRoom | null {
         const player = room.players.find((p) => p.id === id);
         return player && !player.isEjected;
     });
-    room.currentTurnPlayerId = room.turnOrder[0];
+    if (room.turnOrder.length === 0) {
+        room.currentTurnPlayerId = null;
+    } else {
+        room.currentTurnPlayerId = room.turnOrder[0];
+    }
     room.turnIndex = 0;
     room.votes = {};
     room.players.forEach((p) => {
