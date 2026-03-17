@@ -19,6 +19,7 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         votes: {},
         canvasStrokes: [],
         currentRound: 1,
+        ejectedId: null,
     };
     rooms[roomId] = newRoom;
     return newRoom;
@@ -90,7 +91,9 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     room.canvasStrokes = [];
     room.players.forEach((p) => {
         p.hasVoted = false;
+        p.isEjected = false;
     });
+    room.ejectedId = null;
 
     room.phase = 'ROLE_REVEAL';
     return room;
@@ -100,6 +103,8 @@ export function nextTurn(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (room.currentTurnPlayerId !== playerId) return null;
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player || player.isEjected) return null;
 
     room.turnIndex++;
     if (room.turnIndex >= room.turnOrder.length) {
@@ -121,6 +126,8 @@ export function addStroke(
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (room.currentTurnPlayerId !== playerId) return null; // Only active player can draw
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player || player.isEjected) return null;
 
     room.canvasStrokes.push(stroke);
     return room;
@@ -130,6 +137,8 @@ export function clearCanvas(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (room.currentTurnPlayerId !== playerId) return null;
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player || player.isEjected) return null;
 
     room.canvasStrokes = [];
     return room;
@@ -152,18 +161,49 @@ export function castVote(
 ): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'VOTING' || voterId === votedForId) return null;
-    const isSkip = votedForId === 'skip';
-    const candidateExists = room.players.some((p) => p.id === votedForId);
-    if (!isSkip && !candidateExists) return null;
-    room.votes[voterId] = votedForId;
     const voter = room.players.find((p) => p.id === voterId);
-    if (voter) voter.hasVoted = true;
+    if (!voter || voter.hasVoted || voter.isEjected) return null;
+    const isSkip = votedForId === 'skip';
+    if (!isSkip) {
+        const voted = room.players.find((p) => p.id === votedForId);
+        if (!voted || voted.isEjected) return null;
+    }
+    room.votes[voterId] = votedForId;
+    voter.hasVoted = true;
 
     // Check if everyone has voted
-    const totalConnected = room.players.filter((p) => p.isConnected).length;
+    const totalConnected = room.players.filter(
+        (p) => p.isConnected && !p.isEjected
+    ).length;
     const totalVotesCast = Object.keys(room.votes).length;
 
     if (totalVotesCast >= totalConnected && totalConnected > 0) {
+        const counts: Record<string, number> = {};
+        Object.values(room.votes).forEach((vote) => {
+            counts[vote] = (counts[vote] || 0) + 1;
+        });
+
+        let maxVotes = 0;
+        let ejectedId: null | string = null;
+        let isTie = false;
+
+        Object.entries(counts).forEach(([id, count]) => {
+            if (count > maxVotes) {
+                maxVotes = count;
+                ejectedId = id;
+                isTie = false;
+            } else if (count === maxVotes) {
+                isTie = true;
+            }
+        });
+
+        if (isTie || ejectedId === 'skip') {
+            room.ejectedId = null;
+        } else {
+            room.ejectedId = ejectedId;
+            const ejectedPlayer = room.players.find((p) => p.id === ejectedId);
+            if (ejectedPlayer) ejectedPlayer.isEjected = true;
+        }
         room.phase = 'RESULTS';
     }
 
@@ -185,7 +225,9 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     room.canvasStrokes = [];
     room.players.forEach((p) => {
         p.hasVoted = false;
+        p.isEjected = false;
     });
+    room.ejectedId = null;
     return room;
 }
 
@@ -194,11 +236,20 @@ export function nextRound(roomId: string, playerId: string): GameRoom | null {
     if (!room || room.hostId !== playerId) return null;
     room.phase = 'DRAWING';
     room.currentRound++;
-    room.currentTurnPlayerId = room.turnOrder[0];
+    room.turnOrder = room.turnOrder.filter((id) => {
+        const player = room.players.find((p) => p.id === id);
+        return player && !player.isEjected;
+    });
+    if (room.turnOrder.length === 0) {
+        room.currentTurnPlayerId = null;
+    } else {
+        room.currentTurnPlayerId = room.turnOrder[0];
+    }
     room.turnIndex = 0;
     room.votes = {};
     room.players.forEach((p) => {
         p.hasVoted = false;
     });
+    room.ejectedId = null;
     return room;
 }
