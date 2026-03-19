@@ -143,17 +143,23 @@ export function undoStroke(roomId: string, playerId: string): GameRoom | null {
     if (room.canvasStrokes.length > 0) {
         // Find the last index where isNewStroke is true
         let lastNewStrokeIndex = room.canvasStrokes.length - 1;
-        while (lastNewStrokeIndex >= 0 && !room.canvasStrokes[lastNewStrokeIndex].isNewStroke) {
+        while (
+            lastNewStrokeIndex >= 0 &&
+            !room.canvasStrokes[lastNewStrokeIndex].isNewStroke
+        ) {
             lastNewStrokeIndex--;
         }
-        
+
         if (lastNewStrokeIndex >= 0) {
-            room.canvasStrokes = room.canvasStrokes.slice(0, lastNewStrokeIndex);
+            room.canvasStrokes = room.canvasStrokes.slice(
+                0,
+                lastNewStrokeIndex
+            );
         } else {
             room.canvasStrokes = [];
         }
     }
-    
+
     return room;
 }
 
