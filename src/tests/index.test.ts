@@ -349,7 +349,10 @@ describe('Server API and Socket Integration Tests', () => {
             const hostToken = await getToken('UndoHost', hostUserId);
             const hostSocket = await connectSocket(hostToken);
 
-            const roomCreated = waitForEvent<any>(hostSocket, 'gameStateUpdate');
+            const roomCreated = waitForEvent<any>(
+                hostSocket,
+                'gameStateUpdate'
+            );
             hostSocket.emit('createRoom', { roomId });
             await roomCreated;
 
