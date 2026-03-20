@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import morgan from 'morgan';
 import { randomUUID } from 'crypto';
+import { JoinCreateRoomSchema, StrokeSchema, VoteSchema } from './schemas';
 import {
     createRoom,
     joinRoom,
@@ -94,6 +95,8 @@ const io = new Server(server, {
 
 const socketToRoom: Record<string, string> = {};
 const userIdToSocketId: Record<string, string> = {};
+const lastStrokeTime: Record<string, number> = {};
+const STROKE_LIMIT_MS = parseInt(process.env.STROKE_LIMIT_MS || '5', 10);
 
 io.use((socket, next) => {
     if (io.engine.clientsCount > MAX_CONNECTIONS) {
@@ -135,7 +138,16 @@ io.on('connection', (socket: Socket) => {
         userIdToSocketId[connectingUser.userId] = socket.id;
     }
 
-    socket.on('createRoom', ({ roomId }) => {
+    socket.on('createRoom', (data) => {
+        const validation = JoinCreateRoomSchema.safeParse(data);
+        if (!validation.success) {
+            console.warn(
+                `Invalid createRoom data from ${socket.id}:`,
+                validation.error.format()
+            );
+            return;
+        }
+        const { roomId } = validation.data;
         const user = (socket as any).user;
         createRoom(roomId, user.userId);
         const player: Player = {
@@ -152,7 +164,16 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('joinRoom', ({ roomId }) => {
+    socket.on('joinRoom', (data) => {
+        const validation = JoinCreateRoomSchema.safeParse(data);
+        if (!validation.success) {
+            console.warn(
+                `Invalid joinRoom data from ${socket.id}:`,
+                validation.error.format()
+            );
+            return;
+        }
+        const { roomId } = validation.data;
         const user = (socket as any).user;
         let room = getRoom(roomId);
         if (!room) {
@@ -208,14 +229,36 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('drawStroke', (stroke: StrokeData) => {
+    socket.on('drawStroke', (rawStroke: any) => {
+        const now = Date.now();
+
+        // 1. Rate Limiting: Is it sending data too fast?
+        if (
+            lastStrokeTime[socket.id] &&
+            now - lastStrokeTime[socket.id] < STROKE_LIMIT_MS
+        ) {
+            return;
+        }
+        lastStrokeTime[socket.id] = now;
+
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = addStroke(roomId, user.userId, stroke);
+
+        // 2. Integrity Validation: Is the object in the correct format?
+        const validation = StrokeSchema.safeParse(rawStroke);
+        if (!validation.success) {
+            console.warn(
+                `Attempt to corrupt data from ${socket.id}:`,
+                validation.error.format()
+            );
+            return;
+        }
+
+        const room = addStroke(roomId, user.userId, validation.data);
         if (room) {
             // Broadcast stroke to others instantly for smooth drawing
-            socket.to(roomId).emit('strokeUpdate', stroke);
+            socket.to(roomId).emit('strokeUpdate', validation.data);
         }
     });
 
@@ -239,7 +282,16 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('vote', (votedForId: string) => {
+    socket.on('vote', (rawVotedForId: any) => {
+        const validation = VoteSchema.safeParse(rawVotedForId);
+        if (!validation.success) {
+            console.warn(
+                `Invalid vote data from ${socket.id}:`,
+                validation.error.format()
+            );
+            return;
+        }
+        const votedForId = validation.data;
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
@@ -279,6 +331,7 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
+        delete lastStrokeTime[socket.id];
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (roomId && user) {

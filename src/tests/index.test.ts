@@ -15,6 +15,7 @@ describe('Server API and Socket Integration Tests', () => {
     let port: number;
 
     beforeAll(() => {
+        process.env.STROKE_LIMIT_MS = '0';
         return new Promise<void>((resolve) => {
             server.listen(0, () => {
                 const addy = server.address() as any;
@@ -25,6 +26,7 @@ describe('Server API and Socket Integration Tests', () => {
     });
 
     afterAll(() => {
+        delete process.env.STROKE_LIMIT_MS;
         io.close();
         server.close();
     });
@@ -368,8 +370,10 @@ describe('Server API and Socket Integration Tests', () => {
                 { x: 3, y: 3, color: '#000', isNewStroke: false },
             ];
 
-            strokes.forEach((stroke) => hostSocket.emit('drawStroke', stroke));
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            for (const stroke of strokes) {
+                hostSocket.emit('drawStroke', stroke);
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
 
             const strokeUndone = waitForEvent(hostSocket, 'strokeUndone');
             hostSocket.emit('undoStroke');
