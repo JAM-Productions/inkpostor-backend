@@ -7,7 +7,7 @@ import {
     startGame,
     nextTurn,
     addStroke,
-    clearCanvas,
+    undoStroke,
     proceedToDrawing,
     castVote,
     playAgain,
@@ -248,7 +248,7 @@ describe('gameManager', () => {
         });
     });
 
-    describe('addStroke and clearCanvas', () => {
+    describe('addStroke and undoStroke', () => {
         it('should handle strokes if active player and drawing phase', () => {
             const room = createRoom('room-stroke', 'host1');
             const p1 = createPlayer('p1', 'Alice');
@@ -274,12 +274,12 @@ describe('gameManager', () => {
             expect(result2).toBeNull();
 
             // Clear valid
-            const result3 = clearCanvas('room-stroke', 'p1');
+            const result3 = undoStroke('room-stroke', 'p1');
             expect(result3).not.toBeNull();
             expect(result3!.canvasStrokes.length).toBe(0);
 
             // Clear invalid player
-            const result4 = clearCanvas('room-stroke', 'p2');
+            const result4 = undoStroke('room-stroke', 'p2');
             expect(result4).toBeNull();
         });
 
@@ -293,9 +293,9 @@ describe('gameManager', () => {
             };
 
             expect(addStroke('room-wrong-phase', 'host1', stroke)).toBeNull();
-            expect(clearCanvas('room-wrong-phase', 'host1')).toBeNull();
+            expect(undoStroke('room-wrong-phase', 'host1')).toBeNull();
             expect(addStroke('invalid', 'host1', stroke)).toBeNull();
-            expect(clearCanvas('invalid', 'host1')).toBeNull();
+            expect(undoStroke('invalid', 'host1')).toBeNull();
         });
 
         it('should return null if the player is ejected', () => {
@@ -314,7 +314,7 @@ describe('gameManager', () => {
                 isNewStroke: true,
             };
             expect(addStroke('room-stroke-ejected', 'p1', stroke)).toBeNull();
-            expect(clearCanvas('room-stroke-ejected', 'p1')).toBeNull();
+            expect(undoStroke('room-stroke-ejected', 'p1')).toBeNull();
         });
     });
 

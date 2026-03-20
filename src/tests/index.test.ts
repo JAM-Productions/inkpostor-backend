@@ -8,6 +8,8 @@ vi.mock('express-rate-limit', () => ({
 import { app, server, io } from '../index';
 import { io as Client, Socket } from 'socket.io-client';
 import jwt from 'jsonwebtoken';
+import { getRoom } from '../gameManager';
+import { StrokeData } from '../types';
 
 describe('Server API and Socket Integration Tests', () => {
     let port: number;
@@ -317,6 +319,65 @@ describe('Server API and Socket Integration Tests', () => {
 
             alice1.disconnect();
             alice2.disconnect();
+        }, 15_000);
+    });
+
+    describe('Socket Game Canva Flow', () => {
+        const getToken = async (username: string, userId: string) => {
+            const res = await request(app)
+                .post('/auth')
+                .send({ username, userId });
+            return res.body.token as string;
+        };
+
+        const connectSocket = (token: string): Promise<Socket> =>
+            new Promise((resolve) => {
+                const s = Client(`http://localhost:${port}`, {
+                    reconnectionDelay: 0,
+                    forceNew: true,
+                    auth: { token },
+                });
+                s.on('connect', () => resolve(s));
+            });
+
+        const waitForEvent = <T = any>(s: Socket, event: string): Promise<T> =>
+            new Promise((resolve) => s.once(event, resolve));
+
+        it('undoStroke should remove only the latest stroke group', async () => {
+            const roomId = 'undo-stroke-latest-group-room';
+            const hostUserId = '00000000-0000-4000-8000-000000000011';
+            const hostToken = await getToken('UndoHost', hostUserId);
+            const hostSocket = await connectSocket(hostToken);
+
+            const roomCreated = waitForEvent<any>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            const room = getRoom(roomId);
+            expect(room).toBeDefined();
+            room!.phase = 'DRAWING';
+            room!.currentTurnPlayerId = hostUserId;
+
+            const strokes: StrokeData[] = [
+                { x: 0, y: 0, color: '#000', isNewStroke: true },
+                { x: 1, y: 1, color: '#000', isNewStroke: false },
+                { x: 2, y: 2, color: '#000', isNewStroke: true },
+                { x: 3, y: 3, color: '#000', isNewStroke: false },
+            ];
+
+            strokes.forEach((stroke) => hostSocket.emit('drawStroke', stroke));
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            const strokeUndone = waitForEvent(hostSocket, 'strokeUndone');
+            hostSocket.emit('undoStroke');
+            await strokeUndone;
+
+            expect(room!.canvasStrokes).toEqual(strokes.slice(0, 2));
+
+            hostSocket.disconnect();
         }, 15_000);
     });
 });

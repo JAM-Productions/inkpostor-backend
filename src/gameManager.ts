@@ -133,14 +133,33 @@ export function addStroke(
     return room;
 }
 
-export function clearCanvas(roomId: string, playerId: string): GameRoom | null {
+export function undoStroke(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (room.currentTurnPlayerId !== playerId) return null;
     const player = room.players.find((p) => p.id === playerId);
     if (!player || player.isEjected) return null;
 
-    room.canvasStrokes = [];
+    if (room.canvasStrokes.length > 0) {
+        // Find the last index where isNewStroke is true
+        let lastNewStrokeIndex = room.canvasStrokes.length - 1;
+        while (
+            lastNewStrokeIndex >= 0 &&
+            !room.canvasStrokes[lastNewStrokeIndex].isNewStroke
+        ) {
+            lastNewStrokeIndex--;
+        }
+
+        if (lastNewStrokeIndex >= 0) {
+            room.canvasStrokes = room.canvasStrokes.slice(
+                0,
+                lastNewStrokeIndex
+            );
+        } else {
+            room.canvasStrokes = [];
+        }
+    }
+
     return room;
 }
 

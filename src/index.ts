@@ -18,7 +18,7 @@ import {
     addStroke,
     castVote,
     playAgain,
-    clearCanvas,
+    undoStroke,
     nextRound,
 } from './gameManager';
 import { Player, StrokeData } from './types';
@@ -219,13 +219,13 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('clearCanvas', () => {
+    socket.on('undoStroke', () => {
         const user = (socket as any).user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = clearCanvas(roomId, user.userId);
+        const room = undoStroke(roomId, user.userId);
         if (room) {
-            io.to(roomId).emit('canvasCleared');
+            io.to(roomId).emit('strokeUndone');
         }
     });
 
