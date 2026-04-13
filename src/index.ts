@@ -20,6 +20,7 @@ import {
     playAgain,
     undoStroke,
     nextRound,
+    endGame,
 } from './gameManager';
 import { Player, StrokeData } from './types';
 
@@ -274,6 +275,16 @@ io.on('connection', (socket: Socket) => {
         const room = nextRound(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+        }
+    });
+
+    socket.on('endGame', () => {
+        const user = (socket as any).user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = endGame(roomId, user.userId);
+        if (room) {
+            io.to(roomId).emit('gameStateUpdate', room);
         }
     });
 

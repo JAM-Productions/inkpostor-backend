@@ -380,6 +380,51 @@ describe('Server API and Socket Integration Tests', () => {
             hostSocket.disconnect();
         }, 15_000);
     });
+
+    describe('Socket End Game Flow', () => {
+        const getToken = async (username: string, userId: string) => {
+            const res = await request(app)
+                .post('/auth')
+                .send({ username, userId });
+            return res.body.token as string;
+        };
+
+        const connectSocket = (token: string): Promise<Socket> =>
+            new Promise((resolve) => {
+                const s = Client(`http://localhost:${port}`, {
+                    reconnectionDelay: 0,
+                    forceNew: true,
+                    auth: { token },
+                });
+                s.on('connect', () => resolve(s));
+            });
+
+        const waitForEvent = <T = any>(s: Socket, event: string): Promise<T> =>
+            new Promise((resolve) => s.once(event, resolve));
+
+        it('endGame should propperly set endGame flag to true', async () => {
+            const roomId = 'end-game-flow-room';
+            const hostUserId = '00000000-0000-4000-8000-000000000012';
+            const hostToken = await getToken('EndGameHost', hostUserId);
+            const hostSocket = await connectSocket(hostToken);
+
+            const roomCreated = waitForEvent<any>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+            const room = getRoom(roomId);
+            expect(room).toBeDefined();
+
+            const endGameEvent = waitForEvent(hostSocket, 'gameStateUpdate');
+            hostSocket.emit('endGame');
+            const state = await endGameEvent;
+            expect(state.gameEnded).toBe(true);
+
+            hostSocket.disconnect();
+        }, 15_000);
+    });
 });
 
 // Helper for async callbacks

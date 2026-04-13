@@ -36,6 +36,7 @@ export interface GameRoom {
     canvasStrokes: StrokeData[];
     currentRound: number;
     ejectedId: string | null;
+    gameEnded: boolean;
 }
 
 export interface WordList {

@@ -15,6 +15,7 @@ import {
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
+import { endGame } from '../gameManager';
 
 describe('gameManager', () => {
     // Helper to create basic players
@@ -189,6 +190,7 @@ describe('gameManager', () => {
             expect(result!.turnOrder.length).toBe(3);
             expect(result!.currentTurnPlayerId).not.toBeNull();
             expect(result!.turnOrder).toContain(result!.currentTurnPlayerId);
+            expect(result!.gameEnded).toBe(false);
         });
     });
 
@@ -427,6 +429,7 @@ describe('gameManager', () => {
             expect(result!.votes).toEqual({});
             expect(result!.turnOrder).toEqual([]);
             expect(result!.players[0].hasVoted).toBe(false);
+            expect(result!.gameEnded).toBe(false);
         });
 
         it('should return null for invalid room', () => {
@@ -475,6 +478,42 @@ describe('gameManager', () => {
             expect(result).not.toBeNull();
             expect(result!.turnOrder).toEqual(['p1']);
             expect(result!.currentTurnPlayerId).toBe('p1');
+        });
+    });
+
+    describe('endGame', () => {
+        it('should end the game if the host calls it', () => {
+            const roomId = 'room-end';
+            const hostId = 'host1';
+
+            // Create a room and set the host
+            const room = createRoom(roomId, hostId);
+            expect(room).toBeDefined();
+
+            // End the game
+            const endedRoom = endGame(roomId, hostId);
+            expect(endedRoom).toBeDefined();
+            expect(endedRoom?.phase).toBe('RESULTS');
+            expect(endedRoom?.gameEnded).toBe(true);
+        });
+
+        it('should not end the game if a non-host player calls it', () => {
+            const roomId = 'room-end-nonhost';
+            const hostId = 'host1';
+            const playerId = 'player1';
+
+            // Create a room and set the host
+            const room = createRoom(roomId, hostId);
+            expect(room).toBeDefined();
+
+            // Attempt to end the game as a non-host
+            const endedRoom = endGame(roomId, playerId);
+            expect(endedRoom).toBeNull();
+        });
+
+        it('should return null if the room does not exist', () => {
+            const endedRoom = endGame('nonexistent-room', 'host1');
+            expect(endedRoom).toBeNull();
         });
     });
 });

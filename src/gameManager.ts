@@ -20,6 +20,7 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         canvasStrokes: [],
         currentRound: 1,
         ejectedId: null,
+        gameEnded: false,
     };
     rooms[roomId] = newRoom;
     return newRoom;
@@ -94,6 +95,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
         p.isEjected = false;
     });
     room.ejectedId = null;
+    room.gameEnded = false;
 
     room.phase = 'ROLE_REVEAL';
     return room;
@@ -247,6 +249,7 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
         p.isEjected = false;
     });
     room.ejectedId = null;
+    room.gameEnded = false;
     return room;
 }
 
@@ -270,5 +273,13 @@ export function nextRound(roomId: string, playerId: string): GameRoom | null {
         p.hasVoted = false;
     });
     room.ejectedId = null;
+    return room;
+}
+
+export function endGame(roomId: string, playerId: string): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.hostId !== playerId) return null;
+    room.phase = 'RESULTS';
+    room.gameEnded = true;
     return room;
 }
