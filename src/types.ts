@@ -1,3 +1,16 @@
+import { Socket } from 'socket.io';
+
+export interface UserPayload {
+    userId: string;
+    name: string;
+}
+
+declare module 'socket.io' {
+    interface Socket {
+        user: UserPayload;
+    }
+}
+
 export type GamePhase =
     | 'LOBBY'
     | 'ROLE_REVEAL'

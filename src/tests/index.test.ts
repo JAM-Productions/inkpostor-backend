@@ -9,7 +9,8 @@ import { app, server, io } from '../index';
 import { io as Client, Socket } from 'socket.io-client';
 import jwt from 'jsonwebtoken';
 import { getRoom } from '../gameManager';
-import { StrokeData } from '../types';
+import { StrokeData, UserPayload, GameRoom, Player } from '../types';
+import { AddressInfo } from 'net';
 
 describe('Server API and Socket Integration Tests', () => {
     let port: number;
@@ -17,7 +18,7 @@ describe('Server API and Socket Integration Tests', () => {
     beforeAll(() => {
         return new Promise<void>((resolve) => {
             server.listen(0, () => {
-                const addy = server.address() as any;
+                const addy = server.address() as AddressInfo;
                 port = addy.port;
                 resolve();
             });
@@ -60,7 +61,7 @@ describe('Server API and Socket Integration Tests', () => {
             expect(response.body).toHaveProperty('token');
 
             // Verify token structure
-            const payload = jwt.decode(response.body.token) as any;
+            const payload = jwt.decode(response.body.token) as UserPayload;
             expect(payload.name).toBe('valid_user');
             expect(payload.userId).toBe(testUserId);
         });
@@ -70,7 +71,7 @@ describe('Server API and Socket Integration Tests', () => {
                 .post('/auth')
                 .send({ username: 'no_uuid_user' });
             expect(response.status).toBe(200);
-            const payload = jwt.decode(response.body.token) as any;
+            const payload = jwt.decode(response.body.token) as UserPayload;
             expect(payload.name).toBe('no_uuid_user');
             // Server must have generated a non-empty UUID
             expect(typeof payload.userId).toBe('string');
@@ -83,7 +84,7 @@ describe('Server API and Socket Integration Tests', () => {
                 .post('/auth')
                 .send({ username: 'uuid_user', userId: myUUID });
             expect(response.status).toBe(200);
-            const payload = jwt.decode(response.body.token) as any;
+            const payload = jwt.decode(response.body.token) as UserPayload;
             expect(payload.userId).toBe(myUUID);
         });
 
@@ -97,8 +98,8 @@ describe('Server API and Socket Integration Tests', () => {
                 .post('/auth')
                 .send({ username: 'Alice', userId: aliceUuidB });
 
-            const p1 = jwt.decode(r1.body.token) as any;
-            const p2 = jwt.decode(r2.body.token) as any;
+            const p1 = jwt.decode(r1.body.token) as UserPayload;
+            const p2 = jwt.decode(r2.body.token) as UserPayload;
 
             expect(p1.name).toBe('Alice');
             expect(p2.name).toBe('Alice');
@@ -202,8 +203,10 @@ describe('Server API and Socket Integration Tests', () => {
             });
 
         // Resolves when the socket receives the next `event`
-        const waitForEvent = <T = any>(s: Socket, event: string): Promise<T> =>
-            new Promise((resolve) => s.once(event, resolve));
+        const waitForEvent = <T = unknown>(
+            s: Socket,
+            event: string
+        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
 
         it('player id in room state should be UUID, not display name', async () => {
             const hostUserId = '00000000-0000-4000-8000-000000000006';
@@ -211,7 +214,7 @@ describe('Server API and Socket Integration Tests', () => {
             const hostSocket = await connectSocket(token);
             const roomId = 'uuid-id-check-room-2';
 
-            const statePromise = waitForEvent<any>(
+            const statePromise = waitForEvent<GameRoom>(
                 hostSocket,
                 'gameStateUpdate'
             );
@@ -241,7 +244,7 @@ describe('Server API and Socket Integration Tests', () => {
             const playerSocket = await connectSocket(playerToken);
 
             // Step 1: Host creates room
-            const hostRoomCreated = waitForEvent<any>(
+            const hostRoomCreated = waitForEvent<GameRoom>(
                 hostSocket,
                 'gameStateUpdate'
             );
@@ -249,7 +252,7 @@ describe('Server API and Socket Integration Tests', () => {
             await hostRoomCreated;
 
             // Step 2: Player joins
-            const playerJoined = waitForEvent<any>(
+            const playerJoined = waitForEvent<GameRoom>(
                 playerSocket,
                 'gameStateUpdate'
             );
@@ -268,7 +271,7 @@ describe('Server API and Socket Integration Tests', () => {
             );
             const reconnectSocket = await connectSocket(reconnectToken);
 
-            const reconnectedState = waitForEvent<any>(
+            const reconnectedState = waitForEvent<GameRoom>(
                 reconnectSocket,
                 'gameStateUpdate'
             );
@@ -278,10 +281,10 @@ describe('Server API and Socket Integration Tests', () => {
             // Must stay at exactly 2 players (not 3)
             expect(state.players.length).toBe(2);
             const reconnectedPlayer = state.players.find(
-                (p: any) => p.id === '00000000-0000-4000-8000-000000000008'
+                (p: Player) => p.id === '00000000-0000-4000-8000-000000000008'
             );
             expect(reconnectedPlayer).toBeDefined();
-            expect(reconnectedPlayer.isConnected).toBe(true);
+            expect(reconnectedPlayer?.isConnected).toBe(true);
 
             hostSocket.disconnect();
             reconnectSocket.disconnect();
@@ -302,18 +305,24 @@ describe('Server API and Socket Integration Tests', () => {
             const alice2 = await connectSocket(alice2Token);
 
             // Step 1: Alice1 creates the room
-            const alice1Created = waitForEvent<any>(alice1, 'gameStateUpdate');
+            const alice1Created = waitForEvent<GameRoom>(
+                alice1,
+                'gameStateUpdate'
+            );
             alice1.emit('createRoom', { roomId });
             await alice1Created;
 
             // Step 2: Alice2 joins
-            const alice2Joined = waitForEvent<any>(alice2, 'gameStateUpdate');
+            const alice2Joined = waitForEvent<GameRoom>(
+                alice2,
+                'gameStateUpdate'
+            );
             alice2.emit('joinRoom', { roomId });
             const state = await alice2Joined;
 
             // Must have 2 distinct player entries
             expect(state.players.length).toBe(2);
-            const ids = state.players.map((p: any) => p.id);
+            const ids = state.players.map((p: Player) => p.id);
             expect(ids).toContain('00000000-0000-4000-8000-000000000009');
             expect(ids).toContain('00000000-0000-4000-8000-000000000010');
 
@@ -340,8 +349,10 @@ describe('Server API and Socket Integration Tests', () => {
                 s.on('connect', () => resolve(s));
             });
 
-        const waitForEvent = <T = any>(s: Socket, event: string): Promise<T> =>
-            new Promise((resolve) => s.once(event, resolve));
+        const waitForEvent = <T = unknown>(
+            s: Socket,
+            event: string
+        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
 
         it('undoStroke should remove only the latest stroke group', async () => {
             const roomId = 'undo-stroke-latest-group-room';
@@ -349,7 +360,7 @@ describe('Server API and Socket Integration Tests', () => {
             const hostToken = await getToken('UndoHost', hostUserId);
             const hostSocket = await connectSocket(hostToken);
 
-            const roomCreated = waitForEvent<any>(
+            const roomCreated = waitForEvent<GameRoom>(
                 hostSocket,
                 'gameStateUpdate'
             );
@@ -399,8 +410,10 @@ describe('Server API and Socket Integration Tests', () => {
                 s.on('connect', () => resolve(s));
             });
 
-        const waitForEvent = <T = any>(s: Socket, event: string): Promise<T> =>
-            new Promise((resolve) => s.once(event, resolve));
+        const waitForEvent = <T = unknown>(
+            s: Socket,
+            event: string
+        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
 
         it('endGame should properly set gameEnded flag to true', async () => {
             const roomId = 'end-game-flow-room';
@@ -408,7 +421,7 @@ describe('Server API and Socket Integration Tests', () => {
             const hostToken = await getToken('EndGameHost', hostUserId);
             const hostSocket = await connectSocket(hostToken);
 
-            const roomCreated = waitForEvent<any>(
+            const roomCreated = waitForEvent<GameRoom>(
                 hostSocket,
                 'gameStateUpdate'
             );
@@ -417,7 +430,10 @@ describe('Server API and Socket Integration Tests', () => {
             const room = getRoom(roomId);
             expect(room).toBeDefined();
 
-            const endGameEvent = waitForEvent(hostSocket, 'gameStateUpdate');
+            const endGameEvent = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
             hostSocket.emit('endGame');
             const state = await endGameEvent;
             expect(state.gameEnded).toBe(true);
