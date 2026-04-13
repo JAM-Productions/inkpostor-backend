@@ -453,6 +453,7 @@ describe('gameManager', () => {
             expect(result!.votes).toEqual({});
             expect(result!.turnOrder).toEqual(['p1']);
             expect(result!.players[0].hasVoted).toBe(false);
+            expect(result!.canvasStrokes).toEqual([]);
         });
 
         it('should return null for invalid room', () => {

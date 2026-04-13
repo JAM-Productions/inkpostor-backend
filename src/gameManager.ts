@@ -270,5 +270,6 @@ export function nextRound(roomId: string, playerId: string): GameRoom | null {
         p.hasVoted = false;
     });
     room.ejectedId = null;
+    room.canvasStrokes = [];
     return room;
 }
