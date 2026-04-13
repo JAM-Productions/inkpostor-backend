@@ -12,10 +12,10 @@ import {
     castVote,
     playAgain,
     nextRound,
+    endGame,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
-import { endGame } from '../gameManager';
 
 describe('gameManager', () => {
     // Helper to create basic players

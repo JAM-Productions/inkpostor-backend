@@ -402,7 +402,7 @@ describe('Server API and Socket Integration Tests', () => {
         const waitForEvent = <T = any>(s: Socket, event: string): Promise<T> =>
             new Promise((resolve) => s.once(event, resolve));
 
-        it('endGame should propperly set endGame flag to true', async () => {
+        it('endGame should properly set gameEnded flag to true', async () => {
             const roomId = 'end-game-flow-room';
             const hostUserId = '00000000-0000-4000-8000-000000000012';
             const hostToken = await getToken('EndGameHost', hostUserId);
