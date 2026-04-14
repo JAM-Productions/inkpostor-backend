@@ -265,7 +265,7 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
 
 export function nextRound(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
-    if (!room) return null;
+    if (!room || room.phase !== 'RESULTS' || room.gameEnded) return null;
     const player = room.players.find((p) => p.id === playerId);
     if (!player || player.isEjected) return null;
     player.hasConfirmedNewRound = true;

@@ -489,12 +489,28 @@ describe('gameManager', () => {
             joinRoom('room-nextround-all', p2);
 
             room.phase = 'RESULTS';
-
+            room.currentRound = 1;
+            room.votes = { p1: 'p2', p2: 'p1' };
+            room.canvasStrokes = [
+                {
+                    x: 1,
+                    y: 2,
+                    color: '#000000',
+                    isNewStroke: true,
+                },
+            ];
+            room.players.find((p) => p.id === 'p1')!.hasVoted = true;
+            room.players.find((p) => p.id === 'p2')!.hasVoted = true;
             nextRound('room-nextround-all', 'p1');
             const result = nextRound('room-nextround-all', 'p2');
-
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('DRAWING');
+            expect(result!.currentRound).toBe(2);
+            expect(result!.votes).toEqual({});
+            expect(result!.players.every((p) => p.hasVoted === false)).toBe(
+                true
+            );
+            expect(result!.canvasStrokes).toEqual([]);
         });
 
         it('should return null for invalid room', () => {
