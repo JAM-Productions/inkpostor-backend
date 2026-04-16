@@ -276,7 +276,7 @@ describe('gameManager', () => {
         });
 
         it('should return null for invalid player', () => {
-            const room = createRoom('room-proceed-invalid-player', 'host1');
+            createRoom('room-proceed-invalid-player', 'host1');
             const p1 = createPlayer('p1', 'Alice');
             joinRoom('room-proceed-invalid-player', p1);
             expect(
