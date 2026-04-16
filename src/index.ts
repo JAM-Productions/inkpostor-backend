@@ -96,7 +96,6 @@ const io = new Server(server, {
 const socketToRoom: Record<string, string> = {};
 const userIdToSocketId: Record<string, string> = {};
 const lastStrokeTime: Record<string, number> = {};
-const STROKE_LIMIT_MS = parseInt(process.env.STROKE_LIMIT_MS || '5', 10);
 
 io.use((socket, next) => {
     if (io.engine.clientsCount > MAX_CONNECTIONS) {
@@ -231,11 +230,12 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('drawStroke', (rawStroke: any) => {
         const now = Date.now();
+        const strokeLimit = parseInt(process.env.STROKE_LIMIT_MS || '5', 10);
 
         // 1. Rate Limiting: Is it sending data too fast?
         if (
             lastStrokeTime[socket.id] &&
-            now - lastStrokeTime[socket.id] < STROKE_LIMIT_MS
+            now - lastStrokeTime[socket.id] < strokeLimit
         ) {
             return;
         }
