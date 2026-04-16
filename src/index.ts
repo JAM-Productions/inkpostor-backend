@@ -112,13 +112,21 @@ io.use((socket, next) => {
         return next(new Error('Authentication error: token missing'));
     }
     try {
-        const payload = jwt.verify(
-            token as string,
-            SECRET_KEY
-        ) as unknown as UserPayload;
-        // Attach user info to socket for later use
-        socket.user = payload;
-        next();
+        const payload = jwt.verify(token as string, SECRET_KEY);
+        if (
+            typeof payload === 'object' &&
+            payload !== null &&
+            'userId' in payload &&
+            'name' in payload &&
+            typeof payload.userId === 'string' &&
+            typeof payload.name === 'string'
+        ) {
+            // Attach user info to socket for later use
+            socket.user = payload as unknown as UserPayload;
+            next();
+        } else {
+            next(new Error('Authentication error: invalid token payload'));
+        }
     } catch {
         next(new Error('Authentication error: invalid token'));
     }
