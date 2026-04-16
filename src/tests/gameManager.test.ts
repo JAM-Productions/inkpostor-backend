@@ -274,6 +274,15 @@ describe('gameManager', () => {
         it('should return null for invalid room', () => {
             expect(proceedToDrawing('invalid', 'host1')).toBeNull();
         });
+
+        it('should return null for invalid player', () => {
+            const room = createRoom('room-proceed-invalid-player', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            joinRoom('room-proceed-invalid-player', p1);
+            expect(
+                proceedToDrawing('room-proceed-invalid-player', 'p2')
+            ).toBeNull();
+        });
     });
 
     describe('addStroke and undoStroke', () => {
