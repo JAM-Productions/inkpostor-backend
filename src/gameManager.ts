@@ -93,6 +93,8 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     room.players.forEach((p) => {
         p.hasVoted = false;
         p.isEjected = false;
+        p.hasRevealedRole = false;
+        p.hasConfirmedNewRound = false;
     });
     room.ejectedId = null;
     room.gameEnded = false;
@@ -170,8 +172,14 @@ export function proceedToDrawing(
     playerId: string
 ): GameRoom | null {
     const room = rooms[roomId];
-    if (!room || room.hostId !== playerId) return null;
-    room.phase = 'DRAWING';
+    if (!room || room.phase !== 'ROLE_REVEAL') return null;
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player) return null;
+    player.hasRevealedRole = true;
+    const allRevealed = room.players.every((p) => p.hasRevealedRole);
+    if (allRevealed) {
+        room.phase = 'DRAWING';
+    }
     return room;
 }
 
@@ -247,6 +255,8 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     room.players.forEach((p) => {
         p.hasVoted = false;
         p.isEjected = false;
+        p.hasRevealedRole = false;
+        p.hasConfirmedNewRound = false;
     });
     room.ejectedId = null;
     room.gameEnded = false;
@@ -255,25 +265,34 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
 
 export function nextRound(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
-    if (!room || room.hostId !== playerId) return null;
-    room.phase = 'DRAWING';
-    room.currentRound++;
-    room.turnOrder = room.turnOrder.filter((id) => {
-        const player = room.players.find((p) => p.id === id);
-        return player && !player.isEjected;
-    });
-    if (room.turnOrder.length === 0) {
-        room.currentTurnPlayerId = null;
-    } else {
-        room.currentTurnPlayerId = room.turnOrder[0];
+    if (!room || room.phase !== 'RESULTS' || room.gameEnded) return null;
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player || player.isEjected) return null;
+    player.hasConfirmedNewRound = true;
+    const allConfirmed = room.players.every(
+        (p) => p.isEjected || p.hasConfirmedNewRound
+    );
+    if (allConfirmed) {
+        room.phase = 'DRAWING';
+        room.currentRound++;
+        room.turnOrder = room.turnOrder.filter((id) => {
+            const player = room.players.find((p) => p.id === id);
+            return player && !player.isEjected;
+        });
+        if (room.turnOrder.length === 0) {
+            room.currentTurnPlayerId = null;
+        } else {
+            room.currentTurnPlayerId = room.turnOrder[0];
+        }
+        room.turnIndex = 0;
+        room.votes = {};
+        room.players.forEach((p) => {
+            p.hasVoted = false;
+            p.hasConfirmedNewRound = false;
+        });
+        room.ejectedId = null;
+        room.canvasStrokes = [];
     }
-    room.turnIndex = 0;
-    room.votes = {};
-    room.players.forEach((p) => {
-        p.hasVoted = false;
-    });
-    room.ejectedId = null;
-    room.canvasStrokes = [];
     return room;
 }
 

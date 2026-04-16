@@ -12,6 +12,8 @@ export interface Player {
     score: number;
     hasVoted?: boolean;
     isEjected?: boolean;
+    hasRevealedRole?: boolean;
+    hasConfirmedNewRound?: boolean;
 }
 
 export interface StrokeData {

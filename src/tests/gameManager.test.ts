@@ -238,15 +238,50 @@ describe('gameManager', () => {
     });
 
     describe('proceedToDrawing', () => {
-        it('should set phase to DRAWING', () => {
-            createRoom('room-proceed', 'host1');
-            const result = proceedToDrawing('room-proceed', 'host1');
+        it('should set hasRevealedRole to true for the calling player', () => {
+            const room = createRoom('room-proceed', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('room-proceed', p1);
+            joinRoom('room-proceed', p2);
+
+            room.phase = 'ROLE_REVEAL';
+
+            const result = proceedToDrawing('room-proceed', 'p1');
+            expect(result).not.toBeNull();
+            expect(
+                result!.players.find((p) => p.id === 'p1')!.hasRevealedRole
+            ).toBe(true);
+            expect(result!.phase).toBe('ROLE_REVEAL'); // Phase should not change yet
+        });
+
+        it('should set phase to DRAWING when all players have revealed roles', () => {
+            const room = createRoom('room-proceed-all', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('room-proceed-all', p1);
+            joinRoom('room-proceed-all', p2);
+
+            room.phase = 'ROLE_REVEAL';
+
+            proceedToDrawing('room-proceed-all', 'p1');
+            const result = proceedToDrawing('room-proceed-all', 'p2');
+
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('DRAWING');
         });
 
         it('should return null for invalid room', () => {
             expect(proceedToDrawing('invalid', 'host1')).toBeNull();
+        });
+
+        it('should return null for invalid player', () => {
+            createRoom('room-proceed-invalid-player', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            joinRoom('room-proceed-invalid-player', p1);
+            expect(
+                proceedToDrawing('room-proceed-invalid-player', 'p2')
+            ).toBeNull();
         });
     });
 
@@ -438,24 +473,52 @@ describe('gameManager', () => {
     });
 
     describe('nextRound', () => {
-        it('should reset state correctly', () => {
+        it('should set hasConfirmedNewRound to true for the calling player', () => {
             const room = createRoom('room-nextround', 'host1');
             const p1 = createPlayer('p1', 'Alice');
-            p1.hasVoted = true;
+            const p2 = createPlayer('p2', 'Bob');
             joinRoom('room-nextround', p1);
+            joinRoom('room-nextround', p2);
+
+            room.phase = 'RESULTS';
+
+            const result = nextRound('room-nextround', 'p1');
+            expect(result).not.toBeNull();
+            expect(
+                result!.players.find((p) => p.id === 'p1')!.hasConfirmedNewRound
+            ).toBe(true);
+            expect(result!.phase).toBe('RESULTS'); // Phase should not change yet
+        });
+
+        it('should set phase to DRAWING when all non-ejected players confirm', () => {
+            const room = createRoom('room-nextround-all', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('room-nextround-all', p1);
+            joinRoom('room-nextround-all', p2);
 
             room.phase = 'RESULTS';
             room.currentRound = 1;
-            room.votes = { p1: 'p2' };
-            room.turnOrder = ['p1'];
-
-            const result = nextRound('room-nextround', 'host1');
+            room.votes = { p1: 'p2', p2: 'p1' };
+            room.canvasStrokes = [
+                {
+                    x: 1,
+                    y: 2,
+                    color: '#000000',
+                    isNewStroke: true,
+                },
+            ];
+            room.players.find((p) => p.id === 'p1')!.hasVoted = true;
+            room.players.find((p) => p.id === 'p2')!.hasVoted = true;
+            nextRound('room-nextround-all', 'p1');
+            const result = nextRound('room-nextround-all', 'p2');
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('DRAWING');
             expect(result!.currentRound).toBe(2);
             expect(result!.votes).toEqual({});
-            expect(result!.turnOrder).toEqual(['p1']);
-            expect(result!.players[0].hasVoted).toBe(false);
+            expect(result!.players.every((p) => p.hasVoted === false)).toBe(
+                true
+            );
             expect(result!.canvasStrokes).toEqual([]);
         });
 
@@ -475,7 +538,9 @@ describe('gameManager', () => {
             room.currentRound = 1;
             room.turnOrder = ['p1', 'p2'];
 
-            const result = nextRound('room-nextround-ejected', 'host1');
+            const ejectedResult = nextRound('room-nextround-ejected', 'p2');
+            expect(ejectedResult).toBeNull(); // Ejected player cannot confirm
+            const result = nextRound('room-nextround-ejected', 'p1');
             expect(result).not.toBeNull();
             expect(result!.turnOrder).toEqual(['p1']);
             expect(result!.currentTurnPlayerId).toBe('p1');
