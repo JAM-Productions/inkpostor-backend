@@ -1,7 +1,7 @@
-export interface UserPayload {
-    userId: string;
-    name: string;
-}
+import { z } from 'zod';
+import { UserPayloadSchema, StrokeDataSchema } from './schemas';
+
+export type UserPayload = z.infer<typeof UserPayloadSchema>;
 
 declare module 'socket.io' {
     interface Socket {
@@ -27,12 +27,7 @@ export interface Player {
     hasConfirmedNewRound?: boolean;
 }
 
-export interface StrokeData {
-    x: number;
-    y: number;
-    color: string;
-    isNewStroke: boolean;
-}
+export type StrokeData = z.infer<typeof StrokeDataSchema>;
 
 export interface GameRoom {
     roomId: string;

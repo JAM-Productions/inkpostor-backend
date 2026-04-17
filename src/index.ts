@@ -23,6 +23,13 @@ import {
     endGame,
 } from './gameManager';
 import { Player, StrokeData, UserPayload } from './types';
+import {
+    UserPayloadSchema,
+    CreateRoomSchema,
+    JoinRoomSchema,
+    StrokeDataSchema,
+    VoteSchema,
+} from './schemas';
 
 dotenv.config();
 
@@ -113,16 +120,10 @@ io.use((socket, next) => {
     }
     try {
         const payload = jwt.verify(token as string, SECRET_KEY);
-        if (
-            typeof payload === 'object' &&
-            payload !== null &&
-            'userId' in payload &&
-            'name' in payload &&
-            typeof payload.userId === 'string' &&
-            typeof payload.name === 'string'
-        ) {
+        const result = UserPayloadSchema.safeParse(payload);
+        if (result.success) {
             // Attach user info to socket for later use
-            socket.user = payload as unknown as UserPayload;
+            socket.user = result.data;
             next();
         } else {
             next(new Error('Authentication error: invalid token payload'));
@@ -147,7 +148,12 @@ io.on('connection', (socket: Socket) => {
         userIdToSocketId[connectingUser.userId] = socket.id;
     }
 
-    socket.on('createRoom', ({ roomId }) => {
+    socket.on('createRoom', (payload) => {
+        const result = CreateRoomSchema.safeParse(payload);
+        if (!result.success) {
+            return socket.emit('error', 'Invalid createRoom payload');
+        }
+        const { roomId } = result.data;
         const user = socket.user;
         createRoom(roomId, user.userId);
         const player: Player = {
@@ -164,7 +170,12 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('joinRoom', ({ roomId }) => {
+    socket.on('joinRoom', (payload) => {
+        const result = JoinRoomSchema.safeParse(payload);
+        if (!result.success) {
+            return socket.emit('error', 'Invalid joinRoom payload');
+        }
+        const { roomId } = result.data;
         const user = socket.user;
         let room = getRoom(roomId);
         if (!room) {
@@ -220,7 +231,12 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('drawStroke', (stroke: StrokeData) => {
+    socket.on('drawStroke', (payload) => {
+        const result = StrokeDataSchema.safeParse(payload);
+        if (!result.success) {
+            return socket.emit('error', 'Invalid drawStroke payload');
+        }
+        const stroke = result.data;
         const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
@@ -251,7 +267,12 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('vote', (votedForId: string) => {
+    socket.on('vote', (payload) => {
+        const result = VoteSchema.safeParse(payload);
+        if (!result.success) {
+            return socket.emit('error', 'Invalid vote payload');
+        }
+        const votedForId = result.data;
         const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
