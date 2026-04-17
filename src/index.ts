@@ -22,7 +22,7 @@ import {
     nextRound,
     endGame,
 } from './gameManager';
-import { Player, StrokeData } from './types';
+import { Player, StrokeData, UserPayload } from './types';
 
 dotenv.config();
 
@@ -113,9 +113,20 @@ io.use((socket, next) => {
     }
     try {
         const payload = jwt.verify(token as string, SECRET_KEY);
-        // Attach user info to socket for later use
-        (socket as any).user = payload;
-        next();
+        if (
+            typeof payload === 'object' &&
+            payload !== null &&
+            'userId' in payload &&
+            'name' in payload &&
+            typeof payload.userId === 'string' &&
+            typeof payload.name === 'string'
+        ) {
+            // Attach user info to socket for later use
+            socket.user = payload as unknown as UserPayload;
+            next();
+        } else {
+            next(new Error('Authentication error: invalid token payload'));
+        }
     } catch {
         next(new Error('Authentication error: invalid token'));
     }
@@ -123,7 +134,7 @@ io.use((socket, next) => {
 
 io.on('connection', (socket: Socket) => {
     console.log('User connected:', socket.id);
-    const connectingUser = (socket as any).user;
+    const connectingUser = socket.user;
     if (connectingUser?.userId) {
         const prevSocketId = userIdToSocketId[connectingUser.userId];
         if (prevSocketId && prevSocketId !== socket.id) {
@@ -137,7 +148,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     socket.on('createRoom', ({ roomId }) => {
-        const user = (socket as any).user;
+        const user = socket.user;
         createRoom(roomId, user.userId);
         const player: Player = {
             id: user.userId,
@@ -154,7 +165,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('joinRoom', ({ roomId }) => {
-        const user = (socket as any).user;
+        const user = socket.user;
         let room = getRoom(roomId);
         if (!room) {
             // Auto-create room if it doesn't exist for MVP simplicity
@@ -177,7 +188,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('startGame', () => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = startGame(roomId, user.userId);
@@ -200,7 +211,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('proceedToDrawing', () => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = proceedToDrawing(roomId, user.userId);
@@ -210,7 +221,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('drawStroke', (stroke: StrokeData) => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = addStroke(roomId, user.userId, stroke);
@@ -221,7 +232,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('undoStroke', () => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = undoStroke(roomId, user.userId);
@@ -231,7 +242,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('endTurn', () => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = nextTurn(roomId, user.userId);
@@ -241,7 +252,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('vote', (votedForId: string) => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = castVote(roomId, user.userId, votedForId);
@@ -259,7 +270,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('playAgain', () => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = playAgain(roomId, user.userId);
@@ -269,7 +280,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('nextRound', () => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = nextRound(roomId, user.userId);
@@ -279,7 +290,7 @@ io.on('connection', (socket: Socket) => {
     });
 
     socket.on('endGame', () => {
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = endGame(roomId, user.userId);
@@ -290,7 +301,7 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
-        const user = (socket as any).user;
+        const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (roomId && user) {
             leaveRoom(roomId, user.userId);
