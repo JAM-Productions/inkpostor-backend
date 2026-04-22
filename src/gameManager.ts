@@ -66,12 +66,13 @@ export function leaveRoom(roomId: string, playerId: string) {
         // Transition to RESULTS if impostor leaves
         if (playerId === room.impostorId) {
             room.phase = 'RESULTS';
+            room.gameEnded = true;
             return;
         }
 
         // Revert to LOBBY if connected players < 3
         if (connectedPlayers.length < 3) {
-            room.phase = 'LOBBY';
+            resetRoomState(room, 'LOBBY');
             return;
         }
 
@@ -223,7 +224,12 @@ export function castVote(
 export function playAgain(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.hostId !== playerId) return null;
-    room.phase = 'LOBBY';
+    resetRoomState(room, 'LOBBY');
+    return room;
+}
+
+function resetRoomState(room: GameRoom, phase: typeof room.phase) {
+    room.phase = phase;
     room.currentRound = 1;
     room.impostorId = null;
     room.secretWord = null;
@@ -241,7 +247,6 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     });
     room.ejectedId = null;
     room.gameEnded = false;
-    return room;
 }
 
 export function nextRound(roomId: string, playerId: string): GameRoom | null {

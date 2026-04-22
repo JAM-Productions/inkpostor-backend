@@ -592,28 +592,40 @@ describe('gameManager', () => {
     });
 
     describe('disconnection handling', () => {
-        it('should progress from ROLE_REVEAL if a player disconnects and others are ready', () => {
-            const room = createRoom('rr-disconnect', 'h1');
+        it('should progress from ROLE_REVEAL to DRAWING if a non-ready player disconnects', () => {
+            const room = createRoom('rr-to-draw', 'h1');
             const players = [
                 createPlayer('p1', 'Alice'),
                 createPlayer('p2', 'Bob'),
                 createPlayer('p3', 'Charlie'),
                 createPlayer('p4', 'Dave'),
             ];
-            players.forEach((p) => joinRoom('rr-disconnect', p));
-            startGame('rr-disconnect', 'h1');
-            // Ensure p4 is impostor so others leaving doesn't trigger RESULTS
+            players.forEach((p) => joinRoom('rr-to-draw', p));
+            startGame('rr-to-draw', 'h1');
             room.impostorId = 'p4';
 
-            proceedToDrawing('rr-disconnect', 'p1');
-            proceedToDrawing('rr-disconnect', 'p2');
+            proceedToDrawing('rr-to-draw', 'p1');
+            proceedToDrawing('rr-to-draw', 'p2');
+            proceedToDrawing('rr-to-draw', 'p4');
             expect(room.phase).toBe('ROLE_REVEAL');
 
-            leaveRoom('rr-disconnect', 'p3');
-            expect(room.phase).toBe('ROLE_REVEAL'); // Still p4 missing
+            leaveRoom('rr-to-draw', 'p3'); // p3 was not ready
+            expect(room.phase).toBe('DRAWING');
+        });
 
-            leaveRoom('rr-disconnect', 'p4');
-            expect(room.phase).toBe('RESULTS'); // Impostor left!
+        it('should transition to RESULTS if impostor leaves ROLE_REVEAL', () => {
+            const room = createRoom('rr-impostor-leave', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+            ];
+            players.forEach((p) => joinRoom('rr-impostor-leave', p));
+            startGame('rr-impostor-leave', 'h1');
+            const impostorId = room.impostorId!;
+
+            leaveRoom('rr-impostor-leave', impostorId);
+            expect(room.phase).toBe('RESULTS');
         });
 
         it('should advance turn if current drawer disconnects', () => {
@@ -626,7 +638,7 @@ describe('gameManager', () => {
             ];
             players.forEach((p) => joinRoom('draw-disconnect', p));
             startGame('draw-disconnect', 'h1');
-            room.impostorId = 'p4'; //Dave is impostor
+            room.impostorId = 'p4';
             room.phase = 'DRAWING';
             room.turnOrder = ['p1', 'p2', 'p3'];
             room.turnIndex = 0;
@@ -658,7 +670,7 @@ describe('gameManager', () => {
             expect(room.currentTurnPlayerId).toBeNull();
         });
 
-        it('should progress from VOTING if a player disconnects and others have voted', () => {
+        it('should progress from VOTING if a player who did not vote disconnects', () => {
             const room = createRoom('vote-disconnect', 'h1');
             const players = [
                 createPlayer('p1', 'Alice'),
@@ -673,10 +685,10 @@ describe('gameManager', () => {
 
             castVote('vote-disconnect', 'p1', 'p2');
             castVote('vote-disconnect', 'p2', 'p4');
-            castVote('vote-disconnect', 'p3', 'p1');
+            castVote('vote-disconnect', 'p4', 'p1'); // Impostor voted
             expect(room.phase).toBe('VOTING');
 
-            leaveRoom('vote-disconnect', 'p4');
+            leaveRoom('vote-disconnect', 'p3'); // p3 had not voted
             expect(room.phase).toBe('RESULTS');
         });
 
