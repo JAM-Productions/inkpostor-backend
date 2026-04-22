@@ -25,6 +25,7 @@ export interface Player {
     isEjected?: boolean;
     hasRevealedRole?: boolean;
     hasConfirmedNewRound?: boolean;
+    hasStartedAnEmergencyVoting: boolean;
 }
 
 export interface StrokeData {
