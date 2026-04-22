@@ -692,22 +692,26 @@ describe('gameManager', () => {
             expect(room.phase).toBe('RESULTS');
         });
 
-        it('should start next round from RESULTS if a player disconnects and others have confirmed', () => {
+        it('should start next round from RESULTS if a non-ready player disconnects', () => {
             const room = createRoom('results-disconnect', 'h1');
             const players = [
                 createPlayer('p1', 'Alice'),
                 createPlayer('p2', 'Bob'),
                 createPlayer('p3', 'Charlie'),
+                createPlayer('p4', 'Dave'),
             ];
             players.forEach((p) => joinRoom('results-disconnect', p));
             startGame('results-disconnect', 'h1');
+            // p1, p2, p4 are the remaining connected players after p3 leaves
+            room.impostorId = 'p1';
             room.phase = 'RESULTS';
 
             nextRound('results-disconnect', 'p1');
             nextRound('results-disconnect', 'p2');
+            nextRound('results-disconnect', 'p4');
             expect(room.phase).toBe('RESULTS');
 
-            leaveRoom('results-disconnect', 'p3');
+            leaveRoom('results-disconnect', 'p3'); // p3 was not ready
             expect(room.phase).toBe('DRAWING');
         });
 
@@ -754,6 +758,18 @@ describe('gameManager', () => {
             leaveRoom('start-low', 'p3');
             const result = startGame('start-low', 'h1');
             expect(result).toBeNull();
+        });
+
+        it('should transfer host if host leaves', () => {
+            const room = createRoom('host-leave', 'p1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('host-leave', p1);
+            joinRoom('host-leave', p2);
+            expect(room.hostId).toBe('p1');
+
+            leaveRoom('host-leave', 'p1');
+            expect(room.hostId).toBe('p2');
         });
     });
 });
