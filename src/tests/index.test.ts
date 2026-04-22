@@ -8,7 +8,7 @@ vi.mock('express-rate-limit', () => ({
 import { app, server, io } from '../index';
 import { io as Client, Socket } from 'socket.io-client';
 import jwt from 'jsonwebtoken';
-import { getRoom, createRoom } from '../gameManager';
+import { getRoom } from '../gameManager';
 import { StrokeData, UserPayload, GameRoom, Player } from '../types';
 import { AddressInfo } from 'net';
 
