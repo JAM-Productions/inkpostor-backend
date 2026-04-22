@@ -61,15 +61,20 @@ export function leaveRoom(roomId: string, playerId: string) {
 
     const connectedPlayers = room.players.filter((p) => p.isConnected);
 
+    // Host transfer if host leaves
+    if (playerId === room.hostId && connectedPlayers.length > 0) {
+        room.hostId = connectedPlayers[0].id;
+    }
+
+    // If impostor leaves, the current game session is over
+    if (playerId === room.impostorId && room.phase !== 'LOBBY') {
+        room.phase = 'RESULTS';
+        room.gameEnded = true;
+        return;
+    }
+
     // If game is active (not LOBBY or RESULTS)
     if (room.phase !== 'LOBBY' && room.phase !== 'RESULTS') {
-        // Transition to RESULTS if impostor leaves
-        if (playerId === room.impostorId) {
-            room.phase = 'RESULTS';
-            room.gameEnded = true;
-            return;
-        }
-
         // Revert to LOBBY if connected players < 3
         if (connectedPlayers.length < 3) {
             resetRoomState(room, 'LOBBY');
