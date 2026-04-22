@@ -259,13 +259,17 @@ describe('gameManager', () => {
             const room = createRoom('room-proceed-all', 'host1');
             const p1 = createPlayer('p1', 'Alice');
             const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
             joinRoom('room-proceed-all', p1);
             joinRoom('room-proceed-all', p2);
+            joinRoom('room-proceed-all', p3);
 
             room.phase = 'ROLE_REVEAL';
+            room.turnOrder = ['p1', 'p2', 'p3'];
 
             proceedToDrawing('room-proceed-all', 'p1');
-            const result = proceedToDrawing('room-proceed-all', 'p2');
+            proceedToDrawing('room-proceed-all', 'p2');
+            const result = proceedToDrawing('room-proceed-all', 'p3');
 
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('DRAWING');
@@ -494,10 +498,13 @@ describe('gameManager', () => {
             const room = createRoom('room-nextround-all', 'host1');
             const p1 = createPlayer('p1', 'Alice');
             const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
             joinRoom('room-nextround-all', p1);
             joinRoom('room-nextround-all', p2);
+            joinRoom('room-nextround-all', p3);
 
             room.phase = 'RESULTS';
+            room.turnOrder = ['p1', 'p2', 'p3'];
             room.currentRound = 1;
             room.votes = { p1: 'p2', p2: 'p1' };
             room.canvasStrokes = [
@@ -511,7 +518,8 @@ describe('gameManager', () => {
             room.players.find((p) => p.id === 'p1')!.hasVoted = true;
             room.players.find((p) => p.id === 'p2')!.hasVoted = true;
             nextRound('room-nextround-all', 'p1');
-            const result = nextRound('room-nextround-all', 'p2');
+            nextRound('room-nextround-all', 'p2');
+            const result = nextRound('room-nextround-all', 'p3');
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('DRAWING');
             expect(result!.currentRound).toBe(2);
@@ -580,6 +588,188 @@ describe('gameManager', () => {
         it('should return null if the room does not exist', () => {
             const endedRoom = endGame('nonexistent-room', 'host1');
             expect(endedRoom).toBeNull();
+        });
+    });
+
+    describe('disconnection handling', () => {
+        it('should progress from ROLE_REVEAL to DRAWING if a non-ready player disconnects', () => {
+            const room = createRoom('rr-to-draw', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+                createPlayer('p4', 'Dave'),
+            ];
+            players.forEach((p) => joinRoom('rr-to-draw', p));
+            startGame('rr-to-draw', 'h1');
+            room.impostorId = 'p4';
+
+            proceedToDrawing('rr-to-draw', 'p1');
+            proceedToDrawing('rr-to-draw', 'p2');
+            proceedToDrawing('rr-to-draw', 'p4');
+            expect(room.phase).toBe('ROLE_REVEAL');
+
+            leaveRoom('rr-to-draw', 'p3'); // p3 was not ready
+            expect(room.phase).toBe('DRAWING');
+        });
+
+        it('should transition to RESULTS if impostor leaves ROLE_REVEAL', () => {
+            const room = createRoom('rr-impostor-leave', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+            ];
+            players.forEach((p) => joinRoom('rr-impostor-leave', p));
+            startGame('rr-impostor-leave', 'h1');
+            const impostorId = room.impostorId!;
+
+            leaveRoom('rr-impostor-leave', impostorId);
+            expect(room.phase).toBe('RESULTS');
+        });
+
+        it('should advance turn if current drawer disconnects', () => {
+            const room = createRoom('draw-disconnect', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+                createPlayer('p4', 'Dave'),
+            ];
+            players.forEach((p) => joinRoom('draw-disconnect', p));
+            startGame('draw-disconnect', 'h1');
+            room.impostorId = 'p4';
+            room.phase = 'DRAWING';
+            room.turnOrder = ['p1', 'p2', 'p3'];
+            room.turnIndex = 0;
+            room.currentTurnPlayerId = 'p1';
+
+            leaveRoom('draw-disconnect', 'p1');
+            expect(room.currentTurnPlayerId).toBe('p2');
+            expect(room.turnIndex).toBe(1);
+        });
+
+        it('should transition to VOTING if last drawer disconnects', () => {
+            const room = createRoom('draw-last-disconnect', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+                createPlayer('p4', 'Dave'),
+            ];
+            players.forEach((p) => joinRoom('draw-last-disconnect', p));
+            startGame('draw-last-disconnect', 'h1');
+            room.impostorId = 'p4';
+            room.phase = 'DRAWING';
+            room.turnOrder = ['p1', 'p2', 'p3'];
+            room.turnIndex = 2;
+            room.currentTurnPlayerId = 'p3';
+
+            leaveRoom('draw-last-disconnect', 'p3');
+            expect(room.phase).toBe('VOTING');
+            expect(room.currentTurnPlayerId).toBeNull();
+        });
+
+        it('should progress from VOTING if a player who did not vote disconnects', () => {
+            const room = createRoom('vote-disconnect', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+                createPlayer('p4', 'Dave'),
+            ];
+            players.forEach((p) => joinRoom('vote-disconnect', p));
+            startGame('vote-disconnect', 'h1');
+            room.impostorId = 'p4';
+            room.phase = 'VOTING';
+
+            castVote('vote-disconnect', 'p1', 'p2');
+            castVote('vote-disconnect', 'p2', 'p4');
+            castVote('vote-disconnect', 'p4', 'p1'); // Impostor voted
+            expect(room.phase).toBe('VOTING');
+
+            leaveRoom('vote-disconnect', 'p3'); // p3 had not voted
+            expect(room.phase).toBe('RESULTS');
+        });
+
+        it('should start next round from RESULTS if a non-ready player disconnects', () => {
+            const room = createRoom('results-disconnect', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+                createPlayer('p4', 'Dave'),
+            ];
+            players.forEach((p) => joinRoom('results-disconnect', p));
+            startGame('results-disconnect', 'h1');
+            // p1, p2, p4 are the remaining connected players after p3 leaves
+            room.impostorId = 'p1';
+            room.phase = 'RESULTS';
+
+            nextRound('results-disconnect', 'p1');
+            nextRound('results-disconnect', 'p2');
+            nextRound('results-disconnect', 'p4');
+            expect(room.phase).toBe('RESULTS');
+
+            leaveRoom('results-disconnect', 'p3'); // p3 was not ready
+            expect(room.phase).toBe('DRAWING');
+        });
+
+        it('should transition to RESULTS if impostor disconnects during active game', () => {
+            const room = createRoom('impostor-leave', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+            ];
+            players.forEach((p) => joinRoom('impostor-leave', p));
+            startGame('impostor-leave', 'h1');
+            const impostorId = room.impostorId!;
+
+            leaveRoom('impostor-leave', impostorId);
+            expect(room.phase).toBe('RESULTS');
+        });
+
+        it('should revert to LOBBY if connected players < 3 during active game', () => {
+            const room = createRoom('low-players', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+            ];
+            players.forEach((p) => joinRoom('low-players', p));
+            startGame('low-players', 'h1');
+
+            // Find a non-impostor to leave
+            const nonImpostor = players.find((p) => p.id !== room.impostorId)!;
+            leaveRoom('low-players', nonImpostor.id);
+            expect(room.phase).toBe('LOBBY');
+        });
+
+        it('should NOT start game if < 3 players are connected', () => {
+            createRoom('start-low', 'h1');
+            const players = [
+                createPlayer('p1', 'Alice'),
+                createPlayer('p2', 'Bob'),
+                createPlayer('p3', 'Charlie'),
+            ];
+            players.forEach((p) => joinRoom('start-low', p));
+
+            leaveRoom('start-low', 'p3');
+            const result = startGame('start-low', 'h1');
+            expect(result).toBeNull();
+        });
+
+        it('should transfer host if host leaves', () => {
+            const room = createRoom('host-leave', 'p1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('host-leave', p1);
+            joinRoom('host-leave', p2);
+            expect(room.hostId).toBe('p1');
+
+            leaveRoom('host-leave', 'p1');
+            expect(room.hostId).toBe('p2');
         });
     });
 });
