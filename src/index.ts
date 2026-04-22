@@ -156,7 +156,7 @@ io.on('connection', (socket: Socket) => {
             name: user.name,
             isConnected: true,
             score: 0,
-            hasStartedAnEmergencyVoting: false,
+            hasStartedEmergencyVoting: false,
         };
         const room = joinRoom(roomId, player);
         if (room) {
@@ -178,7 +178,7 @@ io.on('connection', (socket: Socket) => {
             name: user.name,
             isConnected: true,
             score: 0,
-            hasStartedAnEmergencyVoting: false,
+            hasStartedEmergencyVoting: false,
         };
         const joinedRoom = joinRoom(roomId, player);
         if (joinedRoom) {

@@ -13,10 +13,10 @@ import {
     playAgain,
     nextRound,
     endGame,
+    startEmergencyVoting,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
-import { startEmergencyVoting } from '../gameManager';
 
 describe('gameManager', () => {
     // Helper to create basic players
@@ -26,7 +26,7 @@ describe('gameManager', () => {
         isConnected: true,
         score: 0,
         hasVoted: false,
-        hasStartedAnEmergencyVoting: false, // Added missing property
+        hasStartedEmergencyVoting: false, // Added missing property
     });
 
     describe('createRoom & getRoom', () => {
@@ -598,9 +598,10 @@ describe('gameManager', () => {
             const result = startEmergencyVoting('room-emergency', 'p1');
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('VOTING');
+            expect(result!.currentTurnPlayerId).toBeNull();
             expect(
                 result!.players.find((p) => p.id === 'p1')!
-                    .hasStartedAnEmergencyVoting
+                    .hasStartedEmergencyVoting
             ).toBe(true);
         });
 

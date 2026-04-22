@@ -492,7 +492,7 @@ describe('Server API and Socket Integration Tests', () => {
             expect(updatedRoom.phase).toBe('VOTING');
             expect(
                 updatedRoom.players.find((p) => p.id === userId)!
-                    .hasStartedAnEmergencyVoting
+                    .hasStartedEmergencyVoting
             ).toBe(true);
 
             clientSocket.disconnect();

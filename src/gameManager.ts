@@ -95,7 +95,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
         p.isEjected = false;
         p.hasRevealedRole = false;
         p.hasConfirmedNewRound = false;
-        p.hasStartedAnEmergencyVoting = false;
+        p.hasStartedEmergencyVoting = false;
     });
     room.ejectedId = null;
     room.gameEnded = false;
@@ -258,7 +258,7 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
         p.isEjected = false;
         p.hasRevealedRole = false;
         p.hasConfirmedNewRound = false;
-        p.hasStartedAnEmergencyVoting = false;
+        p.hasStartedEmergencyVoting = false;
     });
     room.ejectedId = null;
     room.gameEnded = false;
@@ -314,7 +314,8 @@ export function startEmergencyVoting(
     if (!room || room.phase !== 'DRAWING') return null;
     const player = room.players.find((p) => p.id === playerId);
     if (!player || player.isEjected) return null;
-    player.hasStartedAnEmergencyVoting = true;
+    player.hasStartedEmergencyVoting = true;
+    room.currentTurnPlayerId = null;
     room.phase = 'VOTING';
     return room;
 }
