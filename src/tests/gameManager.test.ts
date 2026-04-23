@@ -26,7 +26,7 @@ describe('gameManager', () => {
         isConnected: true,
         score: 0,
         hasVoted: false,
-        hasStartedEmergencyVoting: false, // Added missing property
+        hasStartedEmergencyVoting: false,
     });
 
     describe('createRoom & getRoom', () => {
