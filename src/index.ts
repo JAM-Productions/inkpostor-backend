@@ -21,6 +21,7 @@ import {
     undoStroke,
     nextRound,
     endGame,
+    startEmergencyVoting,
 } from './gameManager';
 import { Player, StrokeData, UserPayload } from './types';
 
@@ -155,6 +156,7 @@ io.on('connection', (socket: Socket) => {
             name: user.name,
             isConnected: true,
             score: 0,
+            hasStartedEmergencyVoting: false,
         };
         const room = joinRoom(roomId, player);
         if (room) {
@@ -176,6 +178,7 @@ io.on('connection', (socket: Socket) => {
             name: user.name,
             isConnected: true,
             score: 0,
+            hasStartedEmergencyVoting: false,
         };
         const joinedRoom = joinRoom(roomId, player);
         if (joinedRoom) {
@@ -296,6 +299,16 @@ io.on('connection', (socket: Socket) => {
         const room = endGame(roomId, user.userId);
         if (room) {
             io.to(roomId).emit('gameStateUpdate', room);
+        }
+    });
+
+    socket.on('startEmergencyVoting', () => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = startEmergencyVoting(roomId, user.userId);
+        if (room) {
+            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
     });
 

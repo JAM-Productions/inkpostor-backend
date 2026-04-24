@@ -13,6 +13,7 @@ import {
     playAgain,
     nextRound,
     endGame,
+    startEmergencyVoting,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
@@ -25,6 +26,7 @@ describe('gameManager', () => {
         isConnected: true,
         score: 0,
         hasVoted: false,
+        hasStartedEmergencyVoting: false,
     });
 
     describe('createRoom & getRoom', () => {
@@ -580,6 +582,50 @@ describe('gameManager', () => {
         it('should return null if the room does not exist', () => {
             const endedRoom = endGame('nonexistent-room', 'host1');
             expect(endedRoom).toBeNull();
+        });
+    });
+
+    describe('startEmergencyVoting', () => {
+        it('should start emergency voting if conditions are met', () => {
+            const room = createRoom('room-emergency', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('room-emergency', p1);
+            joinRoom('room-emergency', p2);
+
+            room.phase = 'DRAWING';
+
+            const result = startEmergencyVoting('room-emergency', 'p1');
+            expect(result).not.toBeNull();
+            expect(result!.phase).toBe('VOTING');
+            expect(result!.currentTurnPlayerId).toBeNull();
+            expect(
+                result!.players.find((p) => p.id === 'p1')!
+                    .hasStartedEmergencyVoting
+            ).toBe(true);
+        });
+
+        it('should not start emergency voting if player is ejected', () => {
+            const room = createRoom('room-emergency-ejected', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            joinRoom('room-emergency-ejected', p1);
+
+            room.phase = 'DRAWING';
+            p1.isEjected = true;
+
+            const result = startEmergencyVoting('room-emergency-ejected', 'p1');
+            expect(result).toBeNull();
+        });
+
+        it('should not start emergency voting if phase is not DRAWING', () => {
+            const room = createRoom('room-emergency-phase', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            joinRoom('room-emergency-phase', p1);
+
+            room.phase = 'LOBBY';
+
+            const result = startEmergencyVoting('room-emergency-phase', 'p1');
+            expect(result).toBeNull();
         });
     });
 });

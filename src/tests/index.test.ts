@@ -441,6 +441,63 @@ describe('Server API and Socket Integration Tests', () => {
             hostSocket.disconnect();
         }, 15_000);
     });
+
+    describe('Socket Game Emergency Voting Flow', () => {
+        const getToken = async (username: string, userId: string) => {
+            const res = await request(app)
+                .post('/auth')
+                .send({ username, userId });
+            return res.body.token as string;
+        };
+
+        const connectSocket = (token: string): Promise<Socket> =>
+            new Promise((resolve) => {
+                const s = Client(`http://localhost:${port}`, {
+                    reconnectionDelay: 0,
+                    forceNew: true,
+                    auth: { token },
+                });
+                s.on('connect', () => resolve(s));
+            });
+
+        const waitForEvent = <T = unknown>(
+            s: Socket,
+            event: string
+        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
+
+        it('should handle startEmergencyVoting socket event correctly', async () => {
+            const roomId = 'test-room-emergency';
+            const userId = '00000000-0000-4000-8000-000000000006';
+            const token = await getToken('TestUser', userId);
+            const clientSocket = await connectSocket(token);
+
+            const roomCreated = waitForEvent<GameRoom>(
+                clientSocket,
+                'gameStateUpdate'
+            );
+            clientSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            const room = getRoom(roomId);
+            expect(room).toBeDefined();
+            room!.phase = 'DRAWING';
+
+            const votingStarted = waitForEvent<GameRoom>(
+                clientSocket,
+                'gameStateUpdate'
+            );
+            clientSocket.emit('startEmergencyVoting');
+            const updatedRoom = await votingStarted;
+
+            expect(updatedRoom.phase).toBe('VOTING');
+            expect(
+                updatedRoom.players.find((p) => p.id === userId)!
+                    .hasStartedEmergencyVoting
+            ).toBe(true);
+
+            clientSocket.disconnect();
+        }, 15_000);
+    });
 });
 
 // Helper for async callbacks
