@@ -142,15 +142,26 @@ describe('gameManager', () => {
     });
 
     describe('leaveRoom', () => {
-        it('should set isConnected to false', () => {
-            createRoom('room-leave', 'host1');
+        it('should remove player if in LOBBY phase', () => {
+            createRoom('room-leave-lobby', 'host1');
             const p1 = createPlayer('p1', 'Alice');
-            joinRoom('room-leave', p1);
+            joinRoom('room-leave-lobby', p1);
 
-            leaveRoom('room-leave', 'p1');
+            leaveRoom('room-leave-lobby', 'p1');
 
-            const room = getRoom('room-leave');
-            expect(room!.players[0].isConnected).toBe(false);
+            const room = getRoom('room-leave-lobby');
+            expect(room!.players.length).toBe(0);
+        });
+
+        it('should set isConnected to false if not in LOBBY phase', () => {
+            const room = createRoom('room-leave-active', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            joinRoom('room-leave-active', p1);
+            room.phase = 'DRAWING';
+
+            leaveRoom('room-leave-active', 'p1');
+
+            expect(room.players[0].isConnected).toBe(false);
         });
 
         it('should do nothing if room or player not found', () => {
