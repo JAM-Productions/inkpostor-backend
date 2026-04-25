@@ -14,6 +14,7 @@ import {
     nextRound,
     endGame,
     startEmergencyVoting,
+    kickPlayer,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
@@ -626,6 +627,51 @@ describe('gameManager', () => {
 
             const result = startEmergencyVoting('room-emergency-phase', 'p1');
             expect(result).toBeNull();
+        });
+    });
+
+    describe('kickPlayer', () => {
+        it('should remove a non-host player when kicked by the host', () => {
+            createRoom('room-kick-success', 'host1');
+            joinRoom('room-kick-success', createPlayer('host1', 'Host'));
+            joinRoom('room-kick-success', createPlayer('p2', 'Bob'));
+
+            const result = kickPlayer('room-kick-success', 'host1', 'p2');
+
+            expect(result).not.toBeNull();
+            expect(result!.players.map((p) => p.id)).toEqual(['host1']);
+        });
+
+        it('should return null when a non-host tries to kick a player', () => {
+            createRoom('room-kick-non-host', 'host1');
+            joinRoom('room-kick-non-host', createPlayer('host1', 'Host'));
+            joinRoom('room-kick-non-host', createPlayer('p2', 'Bob'));
+
+            const result = kickPlayer('room-kick-non-host', 'p2', 'host1');
+
+            expect(result).toBeNull();
+            expect(
+                getRoom('room-kick-non-host')!.players.map((p) => p.id)
+            ).toEqual(['host1', 'p2']);
+        });
+
+        it('should return null when trying to kick the host or a missing player', () => {
+            createRoom('room-kick-invalid-targets', 'host1');
+            joinRoom(
+                'room-kick-invalid-targets',
+                createPlayer('host1', 'Host')
+            );
+            joinRoom('room-kick-invalid-targets', createPlayer('p2', 'Bob'));
+
+            expect(
+                kickPlayer('room-kick-invalid-targets', 'host1', 'host1')
+            ).toBeNull();
+            expect(
+                kickPlayer('room-kick-invalid-targets', 'host1', 'missing')
+            ).toBeNull();
+            expect(
+                getRoom('room-kick-invalid-targets')!.players.map((p) => p.id)
+            ).toEqual(['host1', 'p2']);
         });
     });
 });

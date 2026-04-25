@@ -478,6 +478,89 @@ describe('Server API and Socket Integration Tests', () => {
             clientSocket.disconnect();
         }, 15_000);
     });
+
+    describe('Socket Kick Player Flow', () => {
+        const getToken = async (username: string, userId: string) => {
+            const res = await request(app)
+                .post('/auth')
+                .send({ username, userId });
+            return res.body.token as string;
+        };
+
+        const connectSocket = (token: string): Promise<Socket> =>
+            new Promise((resolve) => {
+                const s = Client(`http://localhost:${port}`, {
+                    reconnectionDelay: 0,
+                    forceNew: true,
+                    auth: { token },
+                });
+                s.on('connect', () => resolve(s));
+            });
+
+        const waitForEvent = <T = unknown>(
+            s: Socket,
+            event: string
+        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
+
+        it('should notify and disconnect the kicked player and remove them from room state', async () => {
+            const roomId = 'kick-player-socket-room';
+            const hostUserId = '00000000-0000-4000-8000-000000000013';
+            const playerUserId = '00000000-0000-4000-8000-000000000014';
+            const hostToken = await getToken('KickHost', hostUserId);
+            const playerToken = await getToken('KickTarget', playerUserId);
+
+            const hostSocket = await connectSocket(hostToken);
+            const playerSocket = await connectSocket(playerToken);
+
+            const roomCreated = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            const playerJoined = waitForEvent<GameRoom>(
+                playerSocket,
+                'gameStateUpdate'
+            );
+            const hostSawJoin = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            playerSocket.emit('joinRoom', { roomId });
+            await Promise.all([playerJoined, hostSawJoin]);
+
+            const hostUpdatedRoom = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            const kickedNotice = waitForEvent<string>(playerSocket, 'kicked');
+            const playerDisconnected = new Promise<string>((resolve) =>
+                playerSocket.once('disconnect', resolve)
+            );
+
+            hostSocket.emit('kickPlayer', playerUserId);
+
+            const [updatedRoom, kickedMessage, disconnectReason] =
+                await Promise.all([
+                    hostUpdatedRoom,
+                    kickedNotice,
+                    playerDisconnected,
+                ]);
+
+            expect(kickedMessage).toBe('You were kicked from the room');
+            expect(disconnectReason).toBe('io server disconnect');
+            expect(updatedRoom.players.map((p: Player) => p.id)).toEqual([
+                hostUserId,
+            ]);
+            expect(getRoom(roomId)?.players.map((p) => p.id)).toEqual([
+                hostUserId,
+            ]);
+            expect(playerSocket.connected).toBe(false);
+
+            hostSocket.disconnect();
+        }, 15_000);
+    });
 });
 
 // Helper for async callbacks

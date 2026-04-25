@@ -319,3 +319,17 @@ export function startEmergencyVoting(
     room.phase = 'VOTING';
     return room;
 }
+
+export function kickPlayer(
+    roomId: string,
+    hostId: string,
+    playerId: string
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.phase !== 'LOBBY' || room.hostId !== hostId) return null;
+    if (playerId === hostId) return null;
+    const playerIndex = room.players.findIndex((p) => p.id === playerId);
+    if (playerIndex === -1) return null;
+    room.players.splice(playerIndex, 1);
+    return room;
+}
