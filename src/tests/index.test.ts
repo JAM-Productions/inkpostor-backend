@@ -16,9 +16,7 @@ describe('Server API and Socket Integration Tests', () => {
     let port: number;
 
     const getToken = async (username: string, userId: string) => {
-        const res = await request(app)
-            .post('/auth')
-            .send({ username, userId });
+        const res = await request(app).post('/auth').send({ username, userId });
 
         if (res.status !== 200) {
             throw new Error(
