@@ -22,6 +22,7 @@ import {
     nextRound,
     endGame,
     startEmergencyVoting,
+    kickPlayer,
 } from './gameManager';
 import { Player, StrokeData, UserPayload } from './types';
 
@@ -311,6 +312,44 @@ io.on('connection', (socket: Socket) => {
             io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
     });
+
+    socket.on(
+        'kickPlayer',
+        (payload: string | { playerId?: string } | undefined) => {
+            const user = socket.user;
+            const roomId = socketToRoom[socket.id];
+            if (!roomId) return;
+
+            const playerId =
+                typeof payload === 'string' ? payload : payload?.playerId;
+            if (!playerId) return;
+
+            const room = kickPlayer(roomId, user.userId, playerId);
+            if (room) {
+                const kickedSocketId = userIdToSocketId[playerId];
+                if (kickedSocketId) {
+                    const kickedSocket = io.sockets.sockets.get(kickedSocketId);
+                    if (kickedSocket) {
+                        kickedSocket.emit(
+                            'kicked',
+                            'You were kicked from the room'
+                        );
+                        kickedSocket.leave(roomId);
+                        delete socketToRoom[kickedSocketId];
+                        kickedSocket.disconnect(true);
+                    }
+                    if (userIdToSocketId[playerId] === kickedSocketId) {
+                        delete userIdToSocketId[playerId];
+                    }
+                }
+
+                io.to(roomId).emit(
+                    'gameStateUpdate',
+                    getSanitizedRoomState(room)
+                );
+            }
+        }
+    );
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
