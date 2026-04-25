@@ -19,24 +19,72 @@ describe('Server API and Socket Integration Tests', () => {
         const res = await request(app)
             .post('/auth')
             .send({ username, userId });
-        return res.body.token as string;
+
+        if (res.status !== 200) {
+            throw new Error(
+                `Failed to get auth token for user "${username}" (${userId}): expected status 200, got ${res.status}. Response body: ${JSON.stringify(res.body)}`
+            );
+        }
+        const token = res.body?.token;
+        if (typeof token !== 'string' || token.length === 0) {
+            throw new Error(
+                `Failed to get auth token for user "${username}" (${userId}): response did not include a valid token. Response body: ${JSON.stringify(res.body)}`
+            );
+        }
+        return token;
     };
 
     const connectSocket = (token: string): Promise<Socket> =>
-        new Promise((resolve) => {
+        new Promise((resolve, reject) => {
             const s = Client(`http://localhost:${port}`, {
                 reconnectionDelay: 0,
                 forceNew: true,
                 auth: { token },
             });
-            s.on('connect', () => resolve(s));
+            const onConnect = () => {
+                cleanup();
+                resolve(s);
+            };
+            const onConnectError = (err: Error) => {
+                cleanup();
+                s.close();
+                reject(err);
+            };
+            const timeout = setTimeout(() => {
+                cleanup();
+                s.close();
+                reject(new Error('Socket connection timed out'));
+            }, 5000);
+            const cleanup = () => {
+                clearTimeout(timeout);
+                s.off('connect', onConnect);
+                s.off('connect_error', onConnectError);
+            };
+            s.once('connect', onConnect);
+            s.once('connect_error', onConnectError);
         });
 
     // Resolves when the socket receives the next `event`
     const waitForEvent = <T = unknown>(
         s: Socket,
-        event: string
-    ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
+        event: string,
+        timeoutMs = 5000
+    ): Promise<T> =>
+        new Promise((resolve, reject) => {
+            const onEvent = (payload: T) => {
+                clearTimeout(timeoutId);
+                resolve(payload);
+            };
+            const timeoutId = setTimeout(() => {
+                s.off(event, onEvent);
+                reject(
+                    new Error(
+                        `Timed out after ${timeoutMs}ms waiting for socket event "${event}"`
+                    )
+                );
+            }, timeoutMs);
+            s.once(event, onEvent);
+        });
 
     beforeAll(() => {
         return new Promise<void>((resolve) => {
