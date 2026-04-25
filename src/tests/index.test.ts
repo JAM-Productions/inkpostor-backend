@@ -15,6 +15,29 @@ import { AddressInfo } from 'net';
 describe('Server API and Socket Integration Tests', () => {
     let port: number;
 
+    const getToken = async (username: string, userId: string) => {
+        const res = await request(app)
+            .post('/auth')
+            .send({ username, userId });
+        return res.body.token as string;
+    };
+
+    const connectSocket = (token: string): Promise<Socket> =>
+        new Promise((resolve) => {
+            const s = Client(`http://localhost:${port}`, {
+                reconnectionDelay: 0,
+                forceNew: true,
+                auth: { token },
+            });
+            s.on('connect', () => resolve(s));
+        });
+
+    // Resolves when the socket receives the next `event`
+    const waitForEvent = <T = unknown>(
+        s: Socket,
+        event: string
+    ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
+
     beforeAll(() => {
         return new Promise<void>((resolve) => {
             server.listen(0, () => {
@@ -185,29 +208,6 @@ describe('Server API and Socket Integration Tests', () => {
     });
 
     describe('Socket Game Room Flow (UUID identity)', () => {
-        const getToken = async (username: string, userId: string) => {
-            const res = await request(app)
-                .post('/auth')
-                .send({ username, userId });
-            return res.body.token as string;
-        };
-
-        const connectSocket = (token: string): Promise<Socket> =>
-            new Promise((resolve) => {
-                const s = Client(`http://localhost:${port}`, {
-                    reconnectionDelay: 0,
-                    forceNew: true,
-                    auth: { token },
-                });
-                s.on('connect', () => resolve(s));
-            });
-
-        // Resolves when the socket receives the next `event`
-        const waitForEvent = <T = unknown>(
-            s: Socket,
-            event: string
-        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
-
         it('player id in room state should be UUID, not display name', async () => {
             const hostUserId = '00000000-0000-4000-8000-000000000006';
             const token = await getToken('HostPlayer', hostUserId);
@@ -332,28 +332,6 @@ describe('Server API and Socket Integration Tests', () => {
     });
 
     describe('Socket Game Canva Flow', () => {
-        const getToken = async (username: string, userId: string) => {
-            const res = await request(app)
-                .post('/auth')
-                .send({ username, userId });
-            return res.body.token as string;
-        };
-
-        const connectSocket = (token: string): Promise<Socket> =>
-            new Promise((resolve) => {
-                const s = Client(`http://localhost:${port}`, {
-                    reconnectionDelay: 0,
-                    forceNew: true,
-                    auth: { token },
-                });
-                s.on('connect', () => resolve(s));
-            });
-
-        const waitForEvent = <T = unknown>(
-            s: Socket,
-            event: string
-        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
-
         it('undoStroke should remove only the latest stroke group', async () => {
             const roomId = 'undo-stroke-latest-group-room';
             const hostUserId = '00000000-0000-4000-8000-000000000011';
@@ -393,28 +371,6 @@ describe('Server API and Socket Integration Tests', () => {
     });
 
     describe('Socket End Game Flow', () => {
-        const getToken = async (username: string, userId: string) => {
-            const res = await request(app)
-                .post('/auth')
-                .send({ username, userId });
-            return res.body.token as string;
-        };
-
-        const connectSocket = (token: string): Promise<Socket> =>
-            new Promise((resolve) => {
-                const s = Client(`http://localhost:${port}`, {
-                    reconnectionDelay: 0,
-                    forceNew: true,
-                    auth: { token },
-                });
-                s.on('connect', () => resolve(s));
-            });
-
-        const waitForEvent = <T = unknown>(
-            s: Socket,
-            event: string
-        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
-
         it('endGame should properly set gameEnded flag to true', async () => {
             const roomId = 'end-game-flow-room';
             const hostUserId = '00000000-0000-4000-8000-000000000012';
@@ -443,28 +399,6 @@ describe('Server API and Socket Integration Tests', () => {
     });
 
     describe('Socket Game Emergency Voting Flow', () => {
-        const getToken = async (username: string, userId: string) => {
-            const res = await request(app)
-                .post('/auth')
-                .send({ username, userId });
-            return res.body.token as string;
-        };
-
-        const connectSocket = (token: string): Promise<Socket> =>
-            new Promise((resolve) => {
-                const s = Client(`http://localhost:${port}`, {
-                    reconnectionDelay: 0,
-                    forceNew: true,
-                    auth: { token },
-                });
-                s.on('connect', () => resolve(s));
-            });
-
-        const waitForEvent = <T = unknown>(
-            s: Socket,
-            event: string
-        ): Promise<T> => new Promise((resolve) => s.once(event, resolve));
-
         it('should handle startEmergencyVoting socket event correctly', async () => {
             const roomId = 'test-room-emergency';
             const userId = '00000000-0000-4000-8000-000000000006';
