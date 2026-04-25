@@ -650,15 +650,17 @@ describe('gameManager', () => {
             const result = kickPlayer('room-kick-non-host', 'p2', 'host1');
 
             expect(result).toBeNull();
-            expect(getRoom('room-kick-non-host')!.players.map((p) => p.id)).toEqual([
-                'host1',
-                'p2',
-            ]);
+            expect(
+                getRoom('room-kick-non-host')!.players.map((p) => p.id)
+            ).toEqual(['host1', 'p2']);
         });
 
         it('should return null when trying to kick the host or a missing player', () => {
             createRoom('room-kick-invalid-targets', 'host1');
-            joinRoom('room-kick-invalid-targets', createPlayer('host1', 'Host'));
+            joinRoom(
+                'room-kick-invalid-targets',
+                createPlayer('host1', 'Host')
+            );
             joinRoom('room-kick-invalid-targets', createPlayer('p2', 'Bob'));
 
             expect(
@@ -667,10 +669,9 @@ describe('gameManager', () => {
             expect(
                 kickPlayer('room-kick-invalid-targets', 'host1', 'missing')
             ).toBeNull();
-            expect(getRoom('room-kick-invalid-targets')!.players.map((p) => p.id)).toEqual([
-                'host1',
-                'p2',
-            ]);
+            expect(
+                getRoom('room-kick-invalid-targets')!.players.map((p) => p.id)
+            ).toEqual(['host1', 'p2']);
         });
     });
 });
