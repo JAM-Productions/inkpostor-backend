@@ -98,6 +98,20 @@ const io = new Server(server, {
 const socketToRoom: Record<string, string> = {};
 const userIdToSocketId: Record<string, string> = {};
 
+function leaveCurrentRoom(socket: Socket) {
+    const user = socket.user;
+    const roomId = socketToRoom[socket.id];
+    if (roomId && user) {
+        leaveRoom(roomId, user.userId);
+        const room = getRoom(roomId);
+        if (room) {
+            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+        }
+        socket.leave(roomId);
+        delete socketToRoom[socket.id];
+    }
+}
+
 io.use((socket, next) => {
     if (io.engine.clientsCount > MAX_CONNECTIONS) {
         return next(
@@ -151,6 +165,7 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('createRoom', ({ roomId }) => {
         const user = socket.user;
+        leaveCurrentRoom(socket);
         createRoom(roomId, user.userId);
         const player: Player = {
             id: user.userId,
@@ -169,6 +184,7 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('joinRoom', ({ roomId }) => {
         const user = socket.user;
+        leaveCurrentRoom(socket);
         let room = getRoom(roomId);
         if (!room) {
             // Auto-create room if it doesn't exist for MVP simplicity
@@ -330,16 +346,18 @@ io.on('connection', (socket: Socket) => {
                 if (kickedSocketId) {
                     const kickedSocket = io.sockets.sockets.get(kickedSocketId);
                     if (kickedSocket) {
-                        kickedSocket.emit(
-                            'kicked',
-                            'You were kicked from the room'
-                        );
                         kickedSocket.leave(roomId);
-                        delete socketToRoom[kickedSocketId];
-                        kickedSocket.disconnect(true);
-                    }
-                    if (userIdToSocketId[playerId] === kickedSocketId) {
-                        delete userIdToSocketId[playerId];
+                        if (socketToRoom[kickedSocketId] === roomId) {
+                            kickedSocket.emit(
+                                'kicked',
+                                'You were kicked from the room'
+                            );
+                            delete socketToRoom[kickedSocketId];
+                            kickedSocket.disconnect(true);
+                            if (userIdToSocketId[playerId] === kickedSocketId) {
+                                delete userIdToSocketId[playerId];
+                            }
+                        }
                     }
                 }
 
@@ -354,18 +372,7 @@ io.on('connection', (socket: Socket) => {
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         const user = socket.user;
-        const roomId = socketToRoom[socket.id];
-        if (roomId && user) {
-            leaveRoom(roomId, user.userId);
-            const room = getRoom(roomId);
-            if (room) {
-                io.to(roomId).emit(
-                    'gameStateUpdate',
-                    getSanitizedRoomState(room)
-                );
-            }
-            delete socketToRoom[socket.id];
-        }
+        leaveCurrentRoom(socket);
         if (user?.userId && userIdToSocketId[user.userId] === socket.id) {
             delete userIdToSocketId[user.userId];
         }

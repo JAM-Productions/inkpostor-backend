@@ -54,9 +54,13 @@ export function joinRoom(roomId: string, player: Player): GameRoom | null {
 export function leaveRoom(roomId: string, playerId: string) {
     const room = rooms[roomId];
     if (!room) return;
-    const player = room.players.find((p) => p.id === playerId);
-    if (player) {
-        player.isConnected = false;
+    const playerIndex = room.players.findIndex((p) => p.id === playerId);
+    if (playerIndex !== -1) {
+        if (room.phase === 'LOBBY') {
+            room.players.splice(playerIndex, 1);
+        } else {
+            room.players[playerIndex].isConnected = false;
+        }
     }
 
     // If no players are connected, we could delete the room after a timeout, but for MVP we just keep it
