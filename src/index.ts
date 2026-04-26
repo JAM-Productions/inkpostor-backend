@@ -105,10 +105,7 @@ function leaveCurrentRoom(socket: Socket) {
         leaveRoom(roomId, user.userId);
         const room = getRoom(roomId);
         if (room) {
-            io.to(roomId).emit(
-                'gameStateUpdate',
-                getSanitizedRoomState(room)
-            );
+            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
         }
         socket.leave(roomId);
         delete socketToRoom[socket.id];
@@ -349,12 +346,12 @@ io.on('connection', (socket: Socket) => {
                 if (kickedSocketId) {
                     const kickedSocket = io.sockets.sockets.get(kickedSocketId);
                     if (kickedSocket) {
-                        kickedSocket.emit(
-                            'kicked',
-                            'You were kicked from the room'
-                        );
                         kickedSocket.leave(roomId);
                         if (socketToRoom[kickedSocketId] === roomId) {
+                            kickedSocket.emit(
+                                'kicked',
+                                'You were kicked from the room'
+                            );
                             delete socketToRoom[kickedSocketId];
                             kickedSocket.disconnect(true);
                             if (userIdToSocketId[playerId] === kickedSocketId) {
