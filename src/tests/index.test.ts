@@ -236,6 +236,29 @@ describe('Server API and Socket Integration Tests', () => {
         );
 
         it(
+            'should block connection if token payload is invalid',
+            _vitestCleanupPromiseFactory((resolve) => {
+                const invalidPayloadToken = jwt.sign(
+                    { name: 'invalid', unexpected: 'payload' },
+                    process.env.JWT_SECRET as string
+                );
+                clientSocket = Client(`http://localhost:${port}`, {
+                    reconnectionDelay: 0,
+                    forceNew: true,
+                    auth: { token: invalidPayloadToken },
+                });
+
+                clientSocket.on('connect_error', (err) => {
+                    expect(err.message).toBe(
+                        'Authentication error: invalid token payload'
+                    );
+                    clientSocket.disconnect();
+                    resolve();
+                });
+            })
+        );
+
+        it(
             'should connect successfully with valid token',
             _vitestCleanupPromiseFactory((resolve) => {
                 clientSocket = Client(`http://localhost:${port}`, {
