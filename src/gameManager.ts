@@ -6,6 +6,7 @@ const rooms: Record<string, GameRoom> = {};
 const kickedFromRoom: Record<string, Set<string>> = {}; // roomId -> Set<playerId>
 
 export function createRoom(roomId: string, hostId: string): GameRoom {
+    if (kickedFromRoom[roomId]) delete kickedFromRoom[roomId];
     const newRoom: GameRoom = {
         roomId,
         hostId,
@@ -121,13 +122,21 @@ export function nextTurn(roomId: string, playerId: string): GameRoom | null {
     const player = room.players.find((p) => p.id === playerId);
     if (!player || player.isEjected) return null;
 
-    room.turnIndex++;
-    if (room.turnIndex >= room.turnOrder.length) {
+    let foundNext = false;
+    while (room.turnIndex < room.turnOrder.length - 1) {
+        room.turnIndex++;
+        const nextId = room.turnOrder[room.turnIndex];
+        const nextP = room.players.find((p) => p.id === nextId);
+        if (nextP && nextP.isConnected && !nextP.isEjected) {
+            room.currentTurnPlayerId = nextId;
+            foundNext = true;
+            break;
+        }
+    }
+    if (!foundNext) {
         // Everyone has drawn, start voting phase!
         room.phase = 'VOTING';
         room.currentTurnPlayerId = null;
-    } else {
-        room.currentTurnPlayerId = room.turnOrder[room.turnIndex];
     }
 
     return room;
@@ -195,6 +204,14 @@ export function proceedToDrawing(
 }
 
 function checkVotingComplete(room: GameRoom) {
+    // Prune stale votes from ejected/disconnected players
+    Object.keys(room.votes).forEach((voterId) => {
+        const voter = room.players.find((p) => p.id === voterId);
+        if (!voter || voter.isEjected || !voter.isConnected) {
+            delete room.votes[voterId];
+        }
+    });
+
     const totalConnected = room.players.filter(
         (p) => p.isConnected && !p.isEjected
     ).length;
@@ -370,7 +387,9 @@ function executeKick(room: GameRoom, playerId: string) {
         return;
     }
 
-    const activePlayers = room.players.filter((p) => !p.isEjected);
+    const activePlayers = room.players.filter(
+        (p) => p.isConnected && !p.isEjected
+    );
     if (activePlayers.length < 3) {
         room.phase = 'RESULTS';
         room.gameEnded = true;
@@ -389,7 +408,7 @@ function executeKick(room: GameRoom, playerId: string) {
             room.turnIndex++;
             const nextId = room.turnOrder[room.turnIndex];
             const nextP = room.players.find((p) => p.id === nextId);
-            if (nextP && !nextP.isEjected) {
+            if (nextP && nextP.isConnected && !nextP.isEjected) {
                 room.currentTurnPlayerId = nextId;
                 foundNext = true;
                 break;
@@ -412,7 +431,8 @@ export function voteKickPlayer(
     targetId: string
 ): GameRoom | null {
     const room = rooms[roomId];
-    if (!room || room.phase === 'LOBBY') return null;
+    if (!room || (room.phase !== 'DRAWING' && room.phase !== 'VOTING'))
+        return null;
     if (voterId === targetId) return null;
 
     const voter = room.players.find((p) => p.id === voterId);
@@ -423,6 +443,12 @@ export function voteKickPlayer(
 
     if (!room.kickVotes) room.kickVotes = {};
     if (!room.kickVotes[targetId]) room.kickVotes[targetId] = [];
+
+    // Prune stale votes before evaluating
+    room.kickVotes[targetId] = room.kickVotes[targetId].filter((vid) => {
+        const v = room.players.find((p) => p.id === vid);
+        return v && v.isConnected && !v.isEjected;
+    });
 
     const votes = room.kickVotes[targetId];
     const voteIndex = votes.indexOf(voterId);
