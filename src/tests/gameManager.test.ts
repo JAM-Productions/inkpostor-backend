@@ -15,6 +15,7 @@ import {
     endGame,
     startEmergencyVoting,
     kickPlayer,
+    voteKickPlayer,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
@@ -642,7 +643,7 @@ describe('gameManager', () => {
     });
 
     describe('kickPlayer', () => {
-        it('should remove a non-host player when kicked by the host', () => {
+        it('should remove a non-host player when kicked by the host in LOBBY', () => {
             createRoom('room-kick-success', 'host1');
             joinRoom('room-kick-success', createPlayer('host1', 'Host'));
             joinRoom('room-kick-success', createPlayer('p2', 'Bob'));
@@ -651,6 +652,65 @@ describe('gameManager', () => {
 
             expect(result).not.toBeNull();
             expect(result!.players.map((p) => p.id)).toEqual(['host1']);
+        });
+
+        it('should return null if trying to use kickPlayer mid-game', () => {
+            const room = createRoom('room-kick-midgame', 'host1');
+            joinRoom('room-kick-midgame', createPlayer('host1', 'Host'));
+            joinRoom('room-kick-midgame', createPlayer('p2', 'Bob'));
+
+            room.phase = 'DRAWING';
+            const result = kickPlayer('room-kick-midgame', 'host1', 'p2');
+            expect(result).toBeNull();
+        });
+    });
+
+    describe('voteKickPlayer', () => {
+        it('should return null in LOBBY phase', () => {
+            createRoom('room-votekick-lobby', 'host1');
+            joinRoom('room-votekick-lobby', createPlayer('host1', 'Host'));
+            joinRoom('room-votekick-lobby', createPlayer('p2', 'Bob'));
+
+            const result = voteKickPlayer('room-votekick-lobby', 'host1', 'p2');
+            expect(result).toBeNull();
+        });
+
+        it('should toggle vote and kick when threshold is met', () => {
+            const room = createRoom('room-votekick-success', 'host1');
+            joinRoom('room-votekick-success', createPlayer('host1', 'Host'));
+            joinRoom('room-votekick-success', createPlayer('p2', 'Bob'));
+            joinRoom('room-votekick-success', createPlayer('p3', 'Charlie'));
+            joinRoom('room-votekick-success', createPlayer('p4', 'Dave'));
+
+            room.phase = 'DRAWING';
+            room.turnOrder = ['host1', 'p2', 'p3', 'p4'];
+            room.turnIndex = 1;
+            room.currentTurnPlayerId = 'p2';
+
+            // P3 votes to kick P2
+            let result = voteKickPlayer('room-votekick-success', 'p3', 'p2');
+            expect(result).not.toBeNull();
+
+            // P4 votes to kick P2 (threshold is 3 votes: host1, p3, p4)
+            result = voteKickPlayer('room-votekick-success', 'p4', 'p2');
+            expect(result).not.toBeNull();
+            expect(result!.kickVotes['p2']).toEqual(['p3', 'p4']);
+            let target = result!.players.find((p) => p.id === 'p2');
+            expect(target!.isEjected).toBeFalsy();
+
+            // Host votes to kick P2 (threshold met)
+            result = voteKickPlayer('room-votekick-success', 'host1', 'p2');
+            expect(result).not.toBeNull();
+            target = result!.players.find((p) => p.id === 'p2');
+            expect(target!.isEjected).toBe(true);
+            expect(target!.isConnected).toBe(false);
+
+            // Votes should reset
+            expect(result!.kickVotes['p2']).toEqual([]);
+
+            // Turn skips to P3
+            expect(result!.currentTurnPlayerId).toBe('p3');
+            expect(result!.turnIndex).toBe(2);
         });
 
         it('should return null when a non-host tries to kick a player', () => {
@@ -683,6 +743,181 @@ describe('gameManager', () => {
             expect(
                 getRoom('room-kick-invalid-targets')!.players.map((p) => p.id)
             ).toEqual(['host1', 'p2']);
+        });
+
+        // ── Win-condition tests after vote-kick ──────────────────────────────
+
+        it('impostor vote-kicked: phase=RESULTS, ejectedId===impostorId (crewmates win)', () => {
+            const room = createRoom('room-vk-impostor-caught', 'host1');
+            joinRoom('room-vk-impostor-caught', createPlayer('host1', 'Host'));
+            joinRoom(
+                'room-vk-impostor-caught',
+                createPlayer('impostor', 'Bad')
+            );
+            joinRoom('room-vk-impostor-caught', createPlayer('p3', 'Charlie'));
+            room.phase = 'DRAWING';
+            room.impostorId = 'impostor';
+            room.turnOrder = ['host1', 'impostor', 'p3'];
+            room.currentTurnPlayerId = 'impostor';
+            room.turnIndex = 1;
+
+            voteKickPlayer('room-vk-impostor-caught', 'host1', 'impostor');
+            const result = voteKickPlayer(
+                'room-vk-impostor-caught',
+                'p3',
+                'impostor'
+            );
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+            expect(result!.ejectedId).toBe('impostor');
+            expect(result!.ejectedId).toBe(result!.impostorId);
+        });
+
+        it('crewmate vote-kicked, impostor still active: ejectedId!=impostorId (impostor wins)', () => {
+            const room = createRoom('room-vk-wrong-kick', 'host1');
+            joinRoom('room-vk-wrong-kick', createPlayer('host1', 'Host'));
+            joinRoom('room-vk-wrong-kick', createPlayer('impostor', 'Bad'));
+            joinRoom('room-vk-wrong-kick', createPlayer('p3', 'Charlie'));
+            room.phase = 'DRAWING';
+            room.impostorId = 'impostor';
+            room.turnOrder = ['host1', 'impostor', 'p3'];
+            room.currentTurnPlayerId = 'p3';
+            room.turnIndex = 2;
+
+            voteKickPlayer('room-vk-wrong-kick', 'impostor', 'p3');
+            const result = voteKickPlayer('room-vk-wrong-kick', 'host1', 'p3');
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+            expect(result!.ejectedId).toBe('p3');
+            expect(result!.ejectedId).not.toBe(result!.impostorId);
+        });
+
+        it('crewmate vote-kicked, impostor disconnected: ejectedId===impostorId (crewmates win by attrition)', () => {
+            const room = createRoom('room-vk-impostor-gone', 'host1');
+            joinRoom('room-vk-impostor-gone', createPlayer('host1', 'Host'));
+            const impostor = createPlayer('impostor', 'Bad');
+            joinRoom('room-vk-impostor-gone', impostor);
+            joinRoom('room-vk-impostor-gone', createPlayer('p3', 'Charlie'));
+            room.phase = 'DRAWING';
+            room.impostorId = 'impostor';
+            room.turnOrder = ['host1', 'impostor', 'p3'];
+            room.currentTurnPlayerId = 'p3';
+            room.turnIndex = 2;
+            impostor.isConnected = false;
+
+            const result = voteKickPlayer(
+                'room-vk-impostor-gone',
+                'host1',
+                'p3'
+            );
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+            expect(result!.ejectedId).toBe('impostor');
+        });
+
+        // ── Kick blocklist tests ─────────────────────────────────────────────
+
+        it('lobby-kicked player cannot rejoin the same room', () => {
+            createRoom('room-blocklist-lobby', 'host1');
+            joinRoom('room-blocklist-lobby', createPlayer('host1', 'Host'));
+            joinRoom('room-blocklist-lobby', createPlayer('p2', 'Bob'));
+            kickPlayer('room-blocklist-lobby', 'host1', 'p2');
+
+            const rejoin = joinRoom(
+                'room-blocklist-lobby',
+                createPlayer('p2', 'Bob')
+            );
+            expect(rejoin).toBeNull();
+        });
+
+        it('mid-game vote-kicked player cannot rejoin the same room', () => {
+            const room = createRoom('room-blocklist-midgame', 'host1');
+            joinRoom('room-blocklist-midgame', createPlayer('host1', 'Host'));
+            joinRoom('room-blocklist-midgame', createPlayer('p2', 'Bob'));
+            joinRoom('room-blocklist-midgame', createPlayer('p3', 'Charlie'));
+            joinRoom('room-blocklist-midgame', createPlayer('p4', 'Dave'));
+            room.phase = 'DRAWING';
+            room.impostorId = 'host1';
+            room.turnOrder = ['host1', 'p2', 'p3', 'p4'];
+            room.currentTurnPlayerId = 'p2';
+            room.turnIndex = 1;
+
+            voteKickPlayer('room-blocklist-midgame', 'p3', 'p2');
+            voteKickPlayer('room-blocklist-midgame', 'p4', 'p2');
+            voteKickPlayer('room-blocklist-midgame', 'host1', 'p2');
+
+            const rejoin = joinRoom(
+                'room-blocklist-midgame',
+                createPlayer('p2', 'Bob')
+            );
+            expect(rejoin).toBeNull();
+        });
+
+        it('playAgain clears the kick blocklist so players can rejoin a new game', () => {
+            createRoom('room-blocklist-reset', 'host1');
+            joinRoom('room-blocklist-reset', createPlayer('host1', 'Host'));
+            joinRoom('room-blocklist-reset', createPlayer('p2', 'Bob'));
+            kickPlayer('room-blocklist-reset', 'host1', 'p2');
+            playAgain('room-blocklist-reset', 'host1');
+
+            const rejoin = joinRoom(
+                'room-blocklist-reset',
+                createPlayer('p2', 'Bob')
+            );
+            expect(rejoin).not.toBeNull();
+        });
+
+        // ── playAgain ejected-player cleanup ─────────────────────────────────
+
+        it('playAgain removes mid-game ejected players from the lobby', () => {
+            const room = createRoom('room-playagain-ejected', 'host1');
+            joinRoom('room-playagain-ejected', createPlayer('host1', 'Host'));
+            joinRoom('room-playagain-ejected', createPlayer('p2', 'Bob'));
+            joinRoom('room-playagain-ejected', createPlayer('p3', 'Charlie'));
+            joinRoom('room-playagain-ejected', createPlayer('p4', 'Dave'));
+            room.phase = 'DRAWING';
+            room.impostorId = 'host1';
+            room.turnOrder = ['host1', 'p2', 'p3', 'p4'];
+            room.currentTurnPlayerId = 'p2';
+            room.turnIndex = 1;
+
+            voteKickPlayer('room-playagain-ejected', 'p3', 'p2');
+            voteKickPlayer('room-playagain-ejected', 'p4', 'p2');
+            voteKickPlayer('room-playagain-ejected', 'host1', 'p2');
+
+            room.gameEnded = true;
+            room.phase = 'RESULTS';
+            playAgain('room-playagain-ejected', 'host1');
+
+            const lobby = getRoom('room-playagain-ejected')!;
+            expect(lobby.phase).toBe('LOBBY');
+            expect(lobby.players.map((p) => p.id)).not.toContain('p2');
+            expect(lobby.players.map((p) => p.id)).toEqual(
+                expect.arrayContaining(['host1', 'p3', 'p4'])
+            );
+        });
+
+        it('vote is toggled off when the same player votes for the same target twice', () => {
+            const room = createRoom('room-vote-toggle', 'host1');
+            joinRoom('room-vote-toggle', createPlayer('host1', 'Host'));
+            joinRoom('room-vote-toggle', createPlayer('p2', 'Bob'));
+            joinRoom('room-vote-toggle', createPlayer('p3', 'Charlie'));
+            joinRoom('room-vote-toggle', createPlayer('p4', 'Dave'));
+            room.phase = 'DRAWING';
+            room.turnOrder = ['host1', 'p2', 'p3', 'p4'];
+            room.currentTurnPlayerId = 'p2';
+            room.turnIndex = 1;
+
+            voteKickPlayer('room-vote-toggle', 'p3', 'p2');
+            const result = voteKickPlayer('room-vote-toggle', 'p3', 'p2');
+
+            expect(result!.kickVotes['p2']).toEqual([]);
+            expect(
+                result!.players.find((p) => p.id === 'p2')!.isEjected
+            ).toBeFalsy();
         });
     });
 });

@@ -560,6 +560,86 @@ describe('Server API and Socket Integration Tests', () => {
 
             hostSocket.disconnect();
         }, 15_000);
+
+        it('voteKickPlayer should notify, disconnect target, and broadcast state update when threshold is met', async () => {
+            const roomId = 'vote-kick-socket-room';
+            const hostUserId = '00000000-0000-4000-8000-000000000015';
+            const player1Id = '00000000-0000-4000-8000-000000000016';
+            const player2Id = '00000000-0000-4000-8000-000000000017';
+            const hostToken = await getToken('VoteHost', hostUserId);
+            const p1Token = await getToken('VoteTarget', player1Id);
+            const p2Token = await getToken('VoteVoter', player2Id);
+
+            const hostSocket = await connectSocket(hostToken);
+            const p1Socket = await connectSocket(p1Token);
+            const p2Socket = await connectSocket(p2Token);
+
+            hostSocket.emit('createRoom', { roomId });
+            await waitForEvent(hostSocket, 'gameStateUpdate');
+
+            p1Socket.emit('joinRoom', { roomId });
+            await Promise.all([
+                waitForEvent(p1Socket, 'gameStateUpdate'),
+                waitForEvent(hostSocket, 'gameStateUpdate'),
+            ]);
+
+            p2Socket.emit('joinRoom', { roomId });
+            await Promise.all([
+                waitForEvent(p2Socket, 'gameStateUpdate'),
+                waitForEvent(p1Socket, 'gameStateUpdate'),
+                waitForEvent(hostSocket, 'gameStateUpdate'),
+            ]);
+
+            // Start game
+            hostSocket.emit('startGame');
+            await Promise.all([
+                waitForEvent(hostSocket, 'gameStateUpdate'),
+                waitForEvent(p1Socket, 'gameStateUpdate'),
+                waitForEvent(p2Socket, 'gameStateUpdate'),
+            ]);
+
+            // Proceed to drawing
+            hostSocket.emit('proceedToDrawing');
+            p1Socket.emit('proceedToDrawing');
+            p2Socket.emit('proceedToDrawing');
+            await new Promise((resolve) => setTimeout(resolve, 200));
+
+            // Setup listeners for ejection
+            const kickedNotice = waitForEvent<string>(p1Socket, 'kicked');
+            const playerDisconnected = new Promise<string>((resolve) =>
+                p1Socket.once('disconnect', resolve)
+            );
+
+            // Host votes P1
+            hostSocket.emit('voteKickPlayer', { targetId: player1Id });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            // Setup listener for final threshold
+            const finalHostUpdatedRoom = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+
+            // P2 votes P1 (Threshold met, 2 active voters)
+            p2Socket.emit('voteKickPlayer', { targetId: player1Id });
+
+            const [updatedRoom, kickedMessage, disconnectReason] =
+                await Promise.all([
+                    finalHostUpdatedRoom,
+                    kickedNotice,
+                    playerDisconnected,
+                ]);
+
+            expect(kickedMessage).toBe('You were kicked from the room by vote');
+            expect(disconnectReason).toBe('io server disconnect');
+            expect(
+                updatedRoom.players.find((p: Player) => p.id === player1Id)
+                    ?.isEjected
+            ).toBe(true);
+
+            hostSocket.disconnect();
+            p2Socket.disconnect();
+        }, 15_000);
     });
 });
 
