@@ -47,6 +47,7 @@ export interface GameRoom {
     turnOrder: string[]; // Array of player IDs
     turnIndex: number;
     votes: Record<string, string>; // Voter ID -> Voted Player ID (or 'skip')
+    kickVotes: Record<string, string[]>; // Target Player ID -> Array of Voter IDs
     canvasStrokes: StrokeData[];
     currentRound: number;
     ejectedId: string | null;
