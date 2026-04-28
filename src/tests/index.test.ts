@@ -605,10 +605,6 @@ describe('Server API and Socket Integration Tests', () => {
             await new Promise((resolve) => setTimeout(resolve, 200));
 
             // Setup listeners for ejection
-            const hostUpdatedRoom = waitForEvent<GameRoom>(
-                hostSocket,
-                'gameStateUpdate'
-            );
             const kickedNotice = waitForEvent<string>(p1Socket, 'kicked');
             const playerDisconnected = new Promise<string>((resolve) =>
                 p1Socket.once('disconnect', resolve)
