@@ -23,6 +23,7 @@ import {
     endGame,
     startEmergencyVoting,
     kickPlayer,
+    voteKickPlayer,
 } from './gameManager';
 import { Player, StrokeData, UserPayload } from './types';
 
@@ -356,6 +357,60 @@ io.on('connection', (socket: Socket) => {
                             kickedSocket.disconnect(true);
                             if (userIdToSocketId[playerId] === kickedSocketId) {
                                 delete userIdToSocketId[playerId];
+                            }
+                        }
+                    }
+                }
+
+                io.to(roomId).emit(
+                    'gameStateUpdate',
+                    getSanitizedRoomState(room)
+                );
+            }
+        }
+    );
+
+    socket.on(
+        'voteKickPlayer',
+        (payload: string | { targetId?: string } | undefined) => {
+            const user = socket.user;
+            const roomId = socketToRoom[socket.id];
+            if (!roomId) return;
+
+            const targetId =
+                typeof payload === 'string' ? payload : payload?.targetId;
+            if (!targetId) return;
+
+            const room = voteKickPlayer(roomId, user.userId, targetId);
+            if (room) {
+                // If the player was successfully kicked by this vote
+                const kickedPlayer = room.players.find(
+                    (p) => p.id === targetId
+                );
+                if (
+                    kickedPlayer &&
+                    kickedPlayer.isEjected &&
+                    !kickedPlayer.isConnected
+                ) {
+                    const kickedSocketId = userIdToSocketId[targetId];
+                    if (kickedSocketId) {
+                        const kickedSocket =
+                            io.sockets.sockets.get(kickedSocketId);
+                        if (kickedSocket) {
+                            kickedSocket.leave(roomId);
+                            if (socketToRoom[kickedSocketId] === roomId) {
+                                kickedSocket.emit(
+                                    'kicked',
+                                    'You were kicked from the room by vote'
+                                );
+                                delete socketToRoom[kickedSocketId];
+                                kickedSocket.disconnect(true);
+                                if (
+                                    userIdToSocketId[targetId] ===
+                                    kickedSocketId
+                                ) {
+                                    delete userIdToSocketId[targetId];
+                                }
                             }
                         }
                     }

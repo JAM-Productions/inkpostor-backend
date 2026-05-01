@@ -67,3 +67,29 @@ docker run -p 3001:3001 --env-file .env inkpostor-backend
 - **Real-time Engine:** Socket.io
 - **Language:** TypeScript
 - **Code Quality:** Prettier, ESLint/oxlint, Vitest
+
+## Documentation
+
+### Game Phases
+- [Game Phases](docs/game_states.md#game-phases)
+
+### Phase Transitions
+- [Phase Transitions](docs/game_states.md#phase-transitions)
+
+### Win / Loss Conditions
+- [Win / Loss Conditions](docs/game_states.md#win--loss-conditions)
+
+### Vote-Kick Mechanics
+- [Vote-Kick Mechanics](docs/game_states.md#vote-kick-mechanics)
+
+### Turn Order
+- [Turn Order](docs/game_states.md#turn-order)
+
+### Multi-Round Games
+- [Multi-Round Games](docs/game_states.md#multi-round-games)
+
+### Secret Information
+- [Secret Information](docs/game_states.md#secret-information)
+
+### Socket Events
+- [Socket Events](docs/game_states.md#socket-events)
