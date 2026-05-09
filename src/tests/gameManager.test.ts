@@ -1037,7 +1037,9 @@ describe('gameManager', () => {
             );
 
             expect(invalidResult).not.toBeNull();
-            expect(invalidResult!.gameOptions.roundTime).toBe(DEFAULT_ROUND_TIME);
+            expect(invalidResult!.gameOptions.roundTime).toBe(
+                DEFAULT_ROUND_TIME
+            );
 
             for (const roundTime of ALLOWED_ROUND_TIMES) {
                 const result = updateGameOptions(
@@ -1055,7 +1057,11 @@ describe('gameManager', () => {
             createRoom('room-options-non-object', 'host1');
 
             expect(
-                updateGameOptions('room-options-non-object', 'host1', 'bad payload')
+                updateGameOptions(
+                    'room-options-non-object',
+                    'host1',
+                    'bad payload'
+                )
             ).toBeNull();
         });
 

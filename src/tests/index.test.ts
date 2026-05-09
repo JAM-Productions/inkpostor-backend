@@ -548,7 +548,10 @@ describe('Server API and Socket Integration Tests', () => {
 
         it('should ignore invalid game option fields from the socket payload', async () => {
             const hostToken = await getToken('Hoster', 'host-options-sanitize');
-            const playerToken = await getToken('Guest', 'guest-options-sanitize');
+            const playerToken = await getToken(
+                'Guest',
+                'guest-options-sanitize'
+            );
             const hostSocket = await connectSocket(hostToken);
             const playerSocket = await connectSocket(playerToken);
             const roomId = `room-${Date.now()}-sanitize`;
