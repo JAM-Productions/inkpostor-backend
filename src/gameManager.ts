@@ -1,6 +1,6 @@
-import { GameRoom, Player, StrokeData } from './types';
+import { GameOptions, GameRoom, Player, StrokeData } from './types';
 import wordData from './data.json';
-import { MAX_NUM_PLAYERS_PER_ROOM } from './constants';
+import { DEFAULT_ROUND_TIME, MAX_NUM_PLAYERS_PER_ROOM } from './constants';
 
 const rooms: Record<string, GameRoom> = {};
 const kickedFromRoom: Record<string, Set<string>> = {}; // roomId -> Set<playerId>
@@ -24,6 +24,11 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         currentRound: 1,
         ejectedId: null,
         gameEnded: false,
+        gameOptions: {
+            roundTime: DEFAULT_ROUND_TIME,
+            unlimitedInk: false,
+            clearCanvasEachRound: true,
+        },
     };
     rooms[roomId] = newRoom;
     return newRoom;
@@ -329,7 +334,9 @@ export function nextRound(roomId: string, playerId: string): GameRoom | null {
             p.hasConfirmedNewRound = false;
         });
         room.ejectedId = null;
-        room.canvasStrokes = [];
+        if (room.gameOptions.clearCanvasEachRound) {
+            room.canvasStrokes = [];
+        }
     }
     return room;
 }
@@ -474,5 +481,17 @@ export function voteKickPlayer(
         kickedFromRoom[roomId].add(targetId);
     }
 
+    return room;
+}
+
+export function updateGameOptions(
+    roomId: string,
+    userId: string,
+    options: GameOptions
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.phase !== 'LOBBY') return null;
+    if (room.hostId !== userId) return null;
+    room.gameOptions = { ...room.gameOptions, ...options };
     return room;
 }
