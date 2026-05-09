@@ -1,9 +1,48 @@
 import { GameOptions, GameRoom, Player, StrokeData } from './types';
 import wordData from './data.json';
-import { DEFAULT_ROUND_TIME, MAX_NUM_PLAYERS_PER_ROOM } from './constants';
+import {
+    ALLOWED_ROUND_TIMES,
+    DEFAULT_ROUND_TIME,
+    MAX_NUM_PLAYERS_PER_ROOM,
+} from './constants';
 
 const rooms: Record<string, GameRoom> = {};
 const kickedFromRoom: Record<string, Set<string>> = {}; // roomId -> Set<playerId>
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sanitizeGameOptionsUpdate(
+    options: unknown,
+    currentOptions: GameOptions
+): GameOptions | null {
+    if (!isPlainObject(options)) return null;
+
+    const nextOptions = { ...currentOptions };
+
+    if (
+        typeof options.roundTime === 'number' &&
+        Number.isFinite(options.roundTime)
+    ) {
+        const normalizedRoundTime = Math.round(options.roundTime);
+        if (
+            ALLOWED_ROUND_TIMES.includes(
+                normalizedRoundTime as (typeof ALLOWED_ROUND_TIMES)[number]
+            )
+        ) {
+            nextOptions.roundTime = normalizedRoundTime;
+        }
+    }
+    if (typeof options.unlimitedInk === 'boolean') {
+        nextOptions.unlimitedInk = options.unlimitedInk;
+    }
+    if (typeof options.clearCanvasEachRound === 'boolean') {
+        nextOptions.clearCanvasEachRound = options.clearCanvasEachRound;
+    }
+
+    return nextOptions;
+}
 
 export function createRoom(roomId: string, hostId: string): GameRoom {
     if (kickedFromRoom[roomId]) delete kickedFromRoom[roomId];
@@ -487,11 +526,16 @@ export function voteKickPlayer(
 export function updateGameOptions(
     roomId: string,
     userId: string,
-    options: GameOptions
+    options: unknown
 ): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'LOBBY') return null;
     if (room.hostId !== userId) return null;
-    room.gameOptions = { ...room.gameOptions, ...options };
+    const sanitizedOptions = sanitizeGameOptionsUpdate(
+        options,
+        room.gameOptions
+    );
+    if (!sanitizedOptions) return null;
+    room.gameOptions = sanitizedOptions;
     return room;
 }

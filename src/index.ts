@@ -26,7 +26,7 @@ import {
     voteKickPlayer,
     updateGameOptions,
 } from './gameManager';
-import { GameOptions, Player, StrokeData, UserPayload } from './types';
+import { Player, StrokeData, UserPayload } from './types';
 
 dotenv.config();
 
@@ -425,7 +425,7 @@ io.on('connection', (socket: Socket) => {
         }
     );
 
-    socket.on('updateGameOptions', (options: GameOptions) => {
+    socket.on('updateGameOptions', (options: unknown) => {
         const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;

@@ -19,7 +19,11 @@ import {
     updateGameOptions,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
-import { DEFAULT_ROUND_TIME, MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
+import {
+    ALLOWED_ROUND_TIMES,
+    DEFAULT_ROUND_TIME,
+    MAX_NUM_PLAYERS_PER_ROOM,
+} from '../constants';
 
 describe('gameManager', () => {
     // Helper to create basic players
@@ -966,14 +970,14 @@ describe('gameManager', () => {
             const room = createRoom('room-options', 'host1');
 
             const result = updateGameOptions('room-options', 'host1', {
-                roundTime: 45,
+                roundTime: 40,
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
             });
 
             expect(result).toBe(room);
             expect(result!.gameOptions).toEqual({
-                roundTime: 45,
+                roundTime: 40,
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
             });
@@ -983,19 +987,76 @@ describe('gameManager', () => {
             createRoom('room-options-merge', 'host1');
 
             updateGameOptions('room-options-merge', 'host1', {
-                roundTime: 60,
-            } as any);
+                roundTime: 35,
+                unlimitedInk: false,
+                clearCanvasEachRound: true,
+            });
 
             const result = updateGameOptions('room-options-merge', 'host1', {
-                unlimitedInk: true,
-            } as any);
-
-            expect(result).not.toBeNull();
-            expect(result!.gameOptions).toEqual({
-                roundTime: 60,
+                roundTime: 35,
                 unlimitedInk: true,
                 clearCanvasEachRound: true,
             });
+
+            expect(result).not.toBeNull();
+            expect(result!.gameOptions).toEqual({
+                roundTime: 35,
+                unlimitedInk: true,
+                clearCanvasEachRound: true,
+            });
+        });
+
+        it('should ignore invalid fields and unknown keys while applying valid updates', () => {
+            createRoom('room-options-sanitize', 'host1');
+
+            const result = updateGameOptions('room-options-sanitize', 'host1', {
+                roundTime: 'bad-value',
+                unlimitedInk: true,
+                clearCanvasEachRound: 'nope',
+                unexpected: 'ignored',
+            });
+
+            expect(result).not.toBeNull();
+            expect(result!.gameOptions).toEqual({
+                roundTime: DEFAULT_ROUND_TIME,
+                unlimitedInk: true,
+                clearCanvasEachRound: true,
+            });
+            expect('unexpected' in result!.gameOptions).toBe(false);
+        });
+
+        it('should only accept configured roundTime values', () => {
+            createRoom('room-options-round-times', 'host1');
+
+            const invalidResult = updateGameOptions(
+                'room-options-round-times',
+                'host1',
+                {
+                    roundTime: 21,
+                }
+            );
+
+            expect(invalidResult).not.toBeNull();
+            expect(invalidResult!.gameOptions.roundTime).toBe(DEFAULT_ROUND_TIME);
+
+            for (const roundTime of ALLOWED_ROUND_TIMES) {
+                const result = updateGameOptions(
+                    'room-options-round-times',
+                    'host1',
+                    { roundTime }
+                );
+
+                expect(result).not.toBeNull();
+                expect(result!.gameOptions.roundTime).toBe(roundTime);
+            }
+        });
+
+        it('should reject non-object payloads', () => {
+            createRoom('room-options-non-object', 'host1');
+
+            expect(
+                updateGameOptions('room-options-non-object', 'host1', 'bad payload')
+            ).toBeNull();
         });
 
         it('should return null for non-hosts, non-lobby rooms, or missing rooms', () => {
