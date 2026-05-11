@@ -9,7 +9,13 @@ import { app, server, io } from '../index';
 import { io as Client, Socket } from 'socket.io-client';
 import jwt from 'jsonwebtoken';
 import { getRoom } from '../gameManager';
-import { StrokeData, UserPayload, GameRoom, Player } from '../types';
+import {
+    StrokeData,
+    UserPayload,
+    GameRoom,
+    Player,
+    GameOptions,
+} from '../types';
 import { AddressInfo } from 'net';
 
 describe('Server API and Socket Integration Tests', () => {
@@ -476,6 +482,132 @@ describe('Server API and Socket Integration Tests', () => {
             ).toBe(true);
 
             clientSocket.disconnect();
+        }, 15_000);
+    });
+
+    describe('Socket Game Options Flow', () => {
+        it('should broadcast updated game options when the host changes them in the lobby', async () => {
+            const roomId = 'game-options-socket-room';
+            const hostUserId = '00000000-0000-4000-8000-000000000018';
+            const playerUserId = '00000000-0000-4000-8000-000000000019';
+            const hostToken = await getToken('OptionsHost', hostUserId);
+            const playerToken = await getToken('OptionsPlayer', playerUserId);
+
+            const hostSocket = await connectSocket(hostToken);
+            const playerSocket = await connectSocket(playerToken);
+
+            const roomCreated = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            const playerJoined = waitForEvent<GameRoom>(
+                playerSocket,
+                'gameStateUpdate'
+            );
+            const hostSawJoin = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            playerSocket.emit('joinRoom', { roomId });
+            await Promise.all([playerJoined, hostSawJoin]);
+
+            const nextHostState = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            const nextPlayerState = waitForEvent<GameRoom>(
+                playerSocket,
+                'gameStateUpdate'
+            );
+
+            const updatedOptions: GameOptions = {
+                roundTime: 40,
+                unlimitedInk: true,
+                clearCanvasEachRound: false,
+            };
+
+            hostSocket.emit('updateGameOptions', updatedOptions);
+
+            const [hostState, playerState] = await Promise.all([
+                nextHostState,
+                nextPlayerState,
+            ]);
+
+            expect(hostState.gameOptions).toEqual(updatedOptions);
+            expect(playerState.gameOptions).toEqual(updatedOptions);
+
+            const room = getRoom(roomId);
+            expect(room?.gameOptions).toEqual(updatedOptions);
+
+            hostSocket.disconnect();
+            playerSocket.disconnect();
+        }, 15_000);
+
+        it('should ignore invalid game option fields from the socket payload', async () => {
+            const hostToken = await getToken('Hoster', 'host-options-sanitize');
+            const playerToken = await getToken(
+                'Guest',
+                'guest-options-sanitize'
+            );
+            const hostSocket = await connectSocket(hostToken);
+            const playerSocket = await connectSocket(playerToken);
+            const roomId = `room-${Date.now()}-sanitize`;
+
+            const roomCreated = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            const playerJoined = waitForEvent<GameRoom>(
+                playerSocket,
+                'gameStateUpdate'
+            );
+            const hostSawJoin = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            playerSocket.emit('joinRoom', { roomId });
+            await Promise.all([playerJoined, hostSawJoin]);
+
+            const nextHostState = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            const nextPlayerState = waitForEvent<GameRoom>(
+                playerSocket,
+                'gameStateUpdate'
+            );
+
+            hostSocket.emit('updateGameOptions', {
+                roundTime: 'oops',
+                unlimitedInk: true,
+                clearCanvasEachRound: 'still nope',
+                unexpected: 'ignored',
+            });
+
+            const [hostState, playerState] = await Promise.all([
+                nextHostState,
+                nextPlayerState,
+            ]);
+
+            expect(hostState.gameOptions).toEqual({
+                roundTime: 20,
+                unlimitedInk: true,
+                clearCanvasEachRound: true,
+            });
+            expect(playerState.gameOptions).toEqual(hostState.gameOptions);
+
+            const room = getRoom(roomId);
+            expect(room?.gameOptions).toEqual(hostState.gameOptions);
+            expect('unexpected' in (room?.gameOptions ?? {})).toBe(false);
+
+            hostSocket.disconnect();
+            playerSocket.disconnect();
         }, 15_000);
     });
 

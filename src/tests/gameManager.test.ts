@@ -16,9 +16,14 @@ import {
     startEmergencyVoting,
     kickPlayer,
     voteKickPlayer,
+    updateGameOptions,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
-import { MAX_NUM_PLAYERS_PER_ROOM } from '../constants';
+import {
+    ALLOWED_ROUND_TIMES,
+    DEFAULT_ROUND_TIME,
+    MAX_NUM_PLAYERS_PER_ROOM,
+} from '../constants';
 
 describe('gameManager', () => {
     // Helper to create basic players
@@ -38,6 +43,11 @@ describe('gameManager', () => {
             expect(room.roomId).toBe('room-create');
             expect(room.hostId).toBe('host1');
             expect(room.phase).toBe('LOBBY');
+            expect(room.gameOptions).toEqual({
+                roundTime: DEFAULT_ROUND_TIME,
+                unlimitedInk: false,
+                clearCanvasEachRound: true,
+            });
 
             const fetched = getRoom('room-create');
             expect(fetched).toBe(room);
@@ -537,6 +547,40 @@ describe('gameManager', () => {
             expect(result!.canvasStrokes).toEqual([]);
         });
 
+        it('should preserve canvas strokes when clearCanvasEachRound is false', () => {
+            const room = createRoom('room-nextround-keep-canvas', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            joinRoom('room-nextround-keep-canvas', p1);
+            joinRoom('room-nextround-keep-canvas', p2);
+
+            room.phase = 'RESULTS';
+            room.currentRound = 1;
+            room.gameOptions.clearCanvasEachRound = false;
+            room.canvasStrokes = [
+                {
+                    x: 10,
+                    y: 20,
+                    color: '#123456',
+                    isNewStroke: true,
+                },
+            ];
+
+            nextRound('room-nextround-keep-canvas', 'p1');
+            const result = nextRound('room-nextround-keep-canvas', 'p2');
+
+            expect(result).not.toBeNull();
+            expect(result!.phase).toBe('DRAWING');
+            expect(result!.canvasStrokes).toEqual([
+                {
+                    x: 10,
+                    y: 20,
+                    color: '#123456',
+                    isNewStroke: true,
+                },
+            ]);
+        });
+
         it('should return null for invalid room', () => {
             expect(nextRound('invalid', 'host1')).toBeNull();
         });
@@ -918,6 +962,134 @@ describe('gameManager', () => {
             expect(
                 result!.players.find((p) => p.id === 'p2')!.isEjected
             ).toBeFalsy();
+        });
+    });
+
+    describe('updateGameOptions', () => {
+        it('should update game options when the host changes them in the lobby', () => {
+            const room = createRoom('room-options', 'host1');
+
+            const result = updateGameOptions('room-options', 'host1', {
+                roundTime: 40,
+                unlimitedInk: true,
+                clearCanvasEachRound: false,
+            });
+
+            expect(result).toBe(room);
+            expect(result!.gameOptions).toEqual({
+                roundTime: 40,
+                unlimitedInk: true,
+                clearCanvasEachRound: false,
+            });
+        });
+
+        it('should merge game options with existing values', () => {
+            createRoom('room-options-merge', 'host1');
+
+            updateGameOptions('room-options-merge', 'host1', {
+                roundTime: 35,
+                unlimitedInk: false,
+                clearCanvasEachRound: true,
+            });
+
+            const result = updateGameOptions('room-options-merge', 'host1', {
+                roundTime: 35,
+                unlimitedInk: true,
+                clearCanvasEachRound: true,
+            });
+
+            expect(result).not.toBeNull();
+            expect(result!.gameOptions).toEqual({
+                roundTime: 35,
+                unlimitedInk: true,
+                clearCanvasEachRound: true,
+            });
+        });
+
+        it('should ignore invalid fields and unknown keys while applying valid updates', () => {
+            createRoom('room-options-sanitize', 'host1');
+
+            const result = updateGameOptions('room-options-sanitize', 'host1', {
+                roundTime: 'bad-value',
+                unlimitedInk: true,
+                clearCanvasEachRound: 'nope',
+                unexpected: 'ignored',
+            });
+
+            expect(result).not.toBeNull();
+            expect(result!.gameOptions).toEqual({
+                roundTime: DEFAULT_ROUND_TIME,
+                unlimitedInk: true,
+                clearCanvasEachRound: true,
+            });
+            expect('unexpected' in result!.gameOptions).toBe(false);
+        });
+
+        it('should only accept configured roundTime values', () => {
+            createRoom('room-options-round-times', 'host1');
+
+            const invalidResult = updateGameOptions(
+                'room-options-round-times',
+                'host1',
+                {
+                    roundTime: 21,
+                }
+            );
+
+            expect(invalidResult).not.toBeNull();
+            expect(invalidResult!.gameOptions.roundTime).toBe(
+                DEFAULT_ROUND_TIME
+            );
+
+            for (const roundTime of ALLOWED_ROUND_TIMES) {
+                const result = updateGameOptions(
+                    'room-options-round-times',
+                    'host1',
+                    { roundTime }
+                );
+
+                expect(result).not.toBeNull();
+                expect(result!.gameOptions.roundTime).toBe(roundTime);
+            }
+        });
+
+        it('should reject non-object payloads', () => {
+            createRoom('room-options-non-object', 'host1');
+
+            expect(
+                updateGameOptions(
+                    'room-options-non-object',
+                    'host1',
+                    'bad payload'
+                )
+            ).toBeNull();
+        });
+
+        it('should return null for non-hosts, non-lobby rooms, or missing rooms', () => {
+            const room = createRoom('room-options-invalid', 'host1');
+            room.phase = 'DRAWING';
+
+            expect(
+                updateGameOptions('room-options-invalid', 'p2', {
+                    roundTime: 30,
+                    unlimitedInk: false,
+                    clearCanvasEachRound: true,
+                })
+            ).toBeNull();
+            expect(
+                updateGameOptions('room-options-invalid', 'host1', {
+                    roundTime: 30,
+                    unlimitedInk: false,
+                    clearCanvasEachRound: true,
+                })
+            ).toBeNull();
+            expect(
+                updateGameOptions('missing-room', 'host1', {
+                    roundTime: 30,
+                    unlimitedInk: false,
+                    clearCanvasEachRound: true,
+                })
+            ).toBeNull();
         });
     });
 });

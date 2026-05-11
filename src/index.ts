@@ -24,6 +24,7 @@ import {
     startEmergencyVoting,
     kickPlayer,
     voteKickPlayer,
+    updateGameOptions,
 } from './gameManager';
 import { Player, StrokeData, UserPayload } from './types';
 
@@ -423,6 +424,16 @@ io.on('connection', (socket: Socket) => {
             }
         }
     );
+
+    socket.on('updateGameOptions', (options: unknown) => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = updateGameOptions(roomId, user.userId, options);
+        if (room) {
+            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+        }
+    });
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);

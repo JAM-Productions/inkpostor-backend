@@ -35,6 +35,12 @@ export interface StrokeData {
     isNewStroke: boolean;
 }
 
+export interface GameOptions {
+    roundTime: number;
+    unlimitedInk: boolean;
+    clearCanvasEachRound: boolean;
+}
+
 export interface GameRoom {
     roomId: string;
     hostId: string;
@@ -52,6 +58,7 @@ export interface GameRoom {
     currentRound: number;
     ejectedId: string | null;
     gameEnded: boolean;
+    gameOptions: GameOptions;
 }
 
 export interface WordList {
