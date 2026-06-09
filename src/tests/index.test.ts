@@ -766,8 +766,7 @@ describe('Server API and Socket Integration Tests', () => {
             expect(disconnectReason).toBe('io server disconnect');
             expect(
                 updatedRoom.players.find((p: Player) => p.id === player1Id)
-                    ?.isEjected
-            ).toBe(true);
+            ).toBeUndefined();
 
             hostSocket.disconnect();
             p2Socket.disconnect();
