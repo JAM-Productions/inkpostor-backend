@@ -464,7 +464,7 @@ function executeKick(room: GameRoom, playerId: string) {
 
     if (wasCurrentTurn) {
         let foundNext = false;
-        room.turnIndex = Math.min(previousTurnIndex, room.turnOrder.length - 1);
+        room.turnIndex = previousTurnIndex;
         while (room.turnIndex >= 0 && room.turnIndex < room.turnOrder.length) {
             const nextId = room.turnOrder[room.turnIndex];
             const nextP = room.players.find((p) => p.id === nextId);

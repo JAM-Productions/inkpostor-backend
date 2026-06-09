@@ -756,6 +756,29 @@ describe('gameManager', () => {
             expect(result!.turnIndex).toBe(1);
         });
 
+        it('should switch to VOTING when the last current turn player is kicked', () => {
+            const room = createRoom('room-votekick-last-turn', 'host1');
+            joinRoom('room-votekick-last-turn', createPlayer('host1', 'Host'));
+            joinRoom('room-votekick-last-turn', createPlayer('p2', 'Bob'));
+            joinRoom('room-votekick-last-turn', createPlayer('p3', 'Charlie'));
+            joinRoom('room-votekick-last-turn', createPlayer('p4', 'Dave'));
+
+            room.phase = 'DRAWING';
+            room.turnOrder = ['host1', 'p2', 'p3', 'p4'];
+            room.turnIndex = 3;
+            room.currentTurnPlayerId = 'p4';
+            room.impostorId = 'host1';
+
+            voteKickPlayer('room-votekick-last-turn', 'host1', 'p4');
+            voteKickPlayer('room-votekick-last-turn', 'p2', 'p4');
+            const result = voteKickPlayer('room-votekick-last-turn', 'p3', 'p4');
+
+            expect(result).not.toBeNull();
+            expect(result!.phase).toBe('VOTING');
+            expect(result!.currentTurnPlayerId).toBeNull();
+            expect(result!.turnOrder).not.toContain('p4');
+        });
+
         it('should return null when a non-host tries to kick a player', () => {
             createRoom('room-kick-non-host', 'host1');
             joinRoom('room-kick-non-host', createPlayer('host1', 'Host'));
