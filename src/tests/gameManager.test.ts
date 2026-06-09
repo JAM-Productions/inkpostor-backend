@@ -771,7 +771,11 @@ describe('gameManager', () => {
 
             voteKickPlayer('room-votekick-last-turn', 'host1', 'p4');
             voteKickPlayer('room-votekick-last-turn', 'p2', 'p4');
-            const result = voteKickPlayer('room-votekick-last-turn', 'p3', 'p4');
+            const result = voteKickPlayer(
+                'room-votekick-last-turn',
+                'p3',
+                'p4'
+            );
 
             expect(result).not.toBeNull();
             expect(result!.phase).toBe('VOTING');
