@@ -328,11 +328,9 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     room.votes = {};
     room.kickVotes = {};
     room.canvasStrokes = [];
-    // Remove ejected players entirely — they were mid-game kicked and
-    // should not return to the lobby (same behaviour as a lobby kick).
-    room.players = room.players.filter((p) => !p.isEjected);
     room.players.forEach((p) => {
         p.hasVoted = false;
+        p.isEjected = false;
         p.hasRevealedRole = false;
         p.hasConfirmedNewRound = false;
         p.hasStartedEmergencyVoting = false;
@@ -420,13 +418,29 @@ export function kickPlayer(
 }
 
 function executeKick(room: GameRoom, playerId: string) {
-    const player = room.players.find((p) => p.id === playerId);
-    if (!player) return;
+    const playerIndex = room.players.findIndex((p) => p.id === playerId);
+    if (playerIndex === -1) return;
 
-    player.isEjected = true;
-    player.isConnected = false;
+    const wasCurrentTurn = room.currentTurnPlayerId === playerId;
+    const wasImpostor = playerId === room.impostorId;
+    const previousTurnIndex = room.turnIndex;
 
-    if (playerId === room.impostorId) {
+    room.players.splice(playerIndex, 1);
+    room.turnOrder = room.turnOrder.filter((id) => id !== playerId);
+    delete room.votes[playerId];
+    Object.keys(room.votes).forEach((voterId) => {
+        if (room.votes[voterId] === playerId) {
+            delete room.votes[voterId];
+        }
+    });
+    delete room.kickVotes[playerId];
+    Object.keys(room.kickVotes).forEach((targetId) => {
+        room.kickVotes[targetId] = room.kickVotes[targetId].filter(
+            (voterId) => voterId !== playerId
+        );
+    });
+
+    if (wasImpostor) {
         room.ejectedId = playerId;
         room.phase = 'RESULTS';
         room.gameEnded = true;
@@ -439,7 +453,7 @@ function executeKick(room: GameRoom, playerId: string) {
     if (activePlayers.length < 3) {
         room.phase = 'RESULTS';
         room.gameEnded = true;
-        // If the impostor is no longer actively playing (disconnected or ejected),
+        // If the impostor is no longer actively playing (disconnected, kicked or ejected),
         // crewmates win by attrition — signal this by setting ejectedId to impostorId
         const impostorActive = room.players.some(
             (p) => p.id === room.impostorId && !p.isEjected && p.isConnected
@@ -448,10 +462,10 @@ function executeKick(room: GameRoom, playerId: string) {
         return;
     }
 
-    if (room.currentTurnPlayerId === playerId) {
+    if (wasCurrentTurn) {
         let foundNext = false;
-        while (room.turnIndex < room.turnOrder.length - 1) {
-            room.turnIndex++;
+        room.turnIndex = Math.min(previousTurnIndex, room.turnOrder.length - 1);
+        while (room.turnIndex >= 0 && room.turnIndex < room.turnOrder.length) {
             const nextId = room.turnOrder[room.turnIndex];
             const nextP = room.players.find((p) => p.id === nextId);
             if (nextP && nextP.isConnected && !nextP.isEjected) {
@@ -459,10 +473,18 @@ function executeKick(room: GameRoom, playerId: string) {
                 foundNext = true;
                 break;
             }
+            room.turnIndex++;
         }
         if (!foundNext) {
             room.phase = 'VOTING';
             room.currentTurnPlayerId = null;
+        }
+    } else if (room.currentTurnPlayerId) {
+        const currentTurnIndex = room.turnOrder.indexOf(
+            room.currentTurnPlayerId
+        );
+        if (currentTurnIndex !== -1) {
+            room.turnIndex = currentTurnIndex;
         }
     }
 
@@ -477,8 +499,7 @@ export function voteKickPlayer(
     targetId: string
 ): GameRoom | null {
     const room = rooms[roomId];
-    if (!room || (room.phase !== 'DRAWING' && room.phase !== 'VOTING'))
-        return null;
+    if (!room || room.phase !== 'DRAWING') return null;
     if (voterId === targetId) return null;
 
     const voter = room.players.find((p) => p.id === voterId);

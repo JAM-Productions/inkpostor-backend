@@ -15,7 +15,7 @@ The Inkpostor game supports two distinct types of player removal depending on th
   - The player **cannot rejoin** the room unless the host clicks "Play Again" (which clears the blocklist).
 
 ## 2. Mid-Game Vote-Kick (Democratic)
-- **Phases:** `DRAWING`, `VOTING`
+- **Phase:** `DRAWING`
 - **Trigger:** A player clicks the kick button next to another player's name in the UI.
 - **Rules:**
   - Any connected, active player can initiate or add a vote against another.
@@ -23,7 +23,7 @@ The Inkpostor game supports two distinct types of player removal depending on th
   - **Threshold required:** All connected, non-ejected players (except the target) must agree.
     - Example: In a 4-player game with all active, 3 votes are required to kick someone.
 - **Outcome:**
-  - The target is marked `isEjected = true` and `isConnected = false`.
+  - The target is immediately removed from the `room.players` array.
   - The player's current turn is immediately skipped if they were drawing.
   - The player is added to the `kickedFromRoom` blocklist so they cannot reconnect during the game.
 
@@ -42,4 +42,4 @@ When a vote-kick successfully ejects a player, the server immediately evaluates 
 
 ## Resetting the Kick Blocklist
 The in-memory blocklist (`kickedFromRoom`) is strictly scoped to a single game session.
-When the host clicks **Play Again**, the blocklist for that room is cleared entirely. This allows previously kicked players to be re-invited to join a fresh game. Furthermore, players who were ejected mid-game are removed entirely from the new lobby state.
+When the host clicks **Play Again**, the blocklist for that room is cleared entirely. This allows previously kicked players to be re-invited to join a fresh game. Players who were ejected by normal gameplay voting remain in the lobby and have `isEjected` reset to `false`.

@@ -43,7 +43,7 @@ RESULTS → LOBBY          (host clicks Play Again)
 
 ## Vote-Kick Mechanics (mid-game only)
 
-- Available during `DRAWING` and `VOTING` phases (not `LOBBY`).
+- Available during the `DRAWING` phase (not `LOBBY` or `VOTING`).
 - Any connected, non-ejected player can vote to kick another.
 - Votes are **toggleable** — clicking again removes your vote.
 - **Threshold**: all connected, non-ejected players except the target must agree.
@@ -59,7 +59,7 @@ requiredVotes = connectedActivePlayers.count(id ≠ target)
 | 5 | 1 | 4 |
 
 Once the threshold is met:
-1. Target is marked `isEjected = true`, `isConnected = false`.
+1. Target is removed from `room.players` and blocklisted for the current game session.
 2. Win condition is evaluated immediately (see table above).
 3. If no game-ending condition: turn is skipped to the next active player.
 4. If no next active player exists: transition to `VOTING`.
@@ -111,7 +111,7 @@ Once the threshold is met:
 | `endTurn` | DRAWING | Current turn player ends their turn |
 | `startEmergencyVoting` | DRAWING | Any player triggers emergency vote |
 | `vote` | VOTING | Player casts or changes vote |
-| `voteKickPlayer` | DRAWING, VOTING | Any player votes to kick a target |
+| `voteKickPlayer` | DRAWING | Any player votes to kick a target |
 | `kickPlayer` | LOBBY | Host removes a player (lobby only) |
 | `nextRound` | RESULTS | Player confirms ready for next round |
 | `endGame` | RESULTS | Host ends the game (host only) |

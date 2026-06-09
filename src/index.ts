@@ -384,15 +384,9 @@ io.on('connection', (socket: Socket) => {
 
             const room = voteKickPlayer(roomId, user.userId, targetId);
             if (room) {
-                // If the player was successfully kicked by this vote
-                const kickedPlayer = room.players.find(
-                    (p) => p.id === targetId
-                );
-                if (
-                    kickedPlayer &&
-                    kickedPlayer.isEjected &&
-                    !kickedPlayer.isConnected
-                ) {
+                // If the vote-kick removed the player from room state, disconnect them.
+                const wasKicked = !room.players.some((p) => p.id === targetId);
+                if (wasKicked) {
                     const kickedSocketId = userIdToSocketId[targetId];
                     if (kickedSocketId) {
                         const kickedSocket =

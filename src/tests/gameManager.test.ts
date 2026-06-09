@@ -746,15 +746,14 @@ describe('gameManager', () => {
             result = voteKickPlayer('room-votekick-success', 'host1', 'p2');
             expect(result).not.toBeNull();
             target = result!.players.find((p) => p.id === 'p2');
-            expect(target!.isEjected).toBe(true);
-            expect(target!.isConnected).toBe(false);
+            expect(target).toBeUndefined();
 
             // Votes should reset
             expect(result!.kickVotes['p2']).toEqual([]);
 
             // Turn skips to P3
             expect(result!.currentTurnPlayerId).toBe('p3');
-            expect(result!.turnIndex).toBe(2);
+            expect(result!.turnIndex).toBe(1);
         });
 
         it('should return null when a non-host tries to kick a player', () => {
@@ -916,7 +915,35 @@ describe('gameManager', () => {
 
         // ── playAgain ejected-player cleanup ─────────────────────────────────
 
-        it('playAgain removes mid-game ejected players from the lobby', () => {
+        it('playAgain keeps normally ejected players and resets isEjected', () => {
+            const room = createRoom('room-playagain-ejected', 'host1');
+            joinRoom('room-playagain-ejected', createPlayer('host1', 'Host'));
+            joinRoom('room-playagain-ejected', createPlayer('p2', 'Bob'));
+            joinRoom('room-playagain-ejected', createPlayer('p3', 'Charlie'));
+            room.phase = 'VOTING';
+            room.impostorId = 'host1';
+
+            castVote('room-playagain-ejected', 'host1', 'p2');
+            castVote('room-playagain-ejected', 'p2', 'skip');
+            const result = castVote('room-playagain-ejected', 'p3', 'p2');
+            expect(result!.players.find((p) => p.id === 'p2')!.isEjected).toBe(
+                true
+            );
+
+            result!.gameEnded = true;
+            playAgain('room-playagain-ejected', 'host1');
+
+            const lobby = getRoom('room-playagain-ejected')!;
+            expect(lobby.phase).toBe('LOBBY');
+            expect(lobby.players.map((p) => p.id)).toEqual(
+                expect.arrayContaining(['host1', 'p2', 'p3'])
+            );
+            expect(lobby.players.find((p) => p.id === 'p2')!.isEjected).toBe(
+                false
+            );
+        });
+
+        it('playAgain keeps vote-kicked players out of the lobby', () => {
             const room = createRoom('room-playagain-ejected', 'host1');
             joinRoom('room-playagain-ejected', createPlayer('host1', 'Host'));
             joinRoom('room-playagain-ejected', createPlayer('p2', 'Bob'));
