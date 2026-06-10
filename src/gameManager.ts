@@ -349,7 +349,7 @@ export function nextRound(roomId: string, playerId: string): GameRoom | null {
     if (!player || player.isEjected) return null;
     player.hasConfirmedNewRound = true;
     const allConfirmed = room.players.every(
-        (p) => p.isEjected || p.hasConfirmedNewRound
+        (p) => p.isEjected || !p.isConnected || p.hasConfirmedNewRound
     );
     if (allConfirmed) {
         room.phase = 'DRAWING';
@@ -448,7 +448,7 @@ function executeKick(room: GameRoom, playerId: string) {
     }
 
     const activePlayers = room.players.filter(
-        (p) => p.isConnected && !p.isEjected
+        (p) => p.isConnected
     );
     if (activePlayers.length < 3) {
         room.phase = 'RESULTS';
@@ -456,7 +456,7 @@ function executeKick(room: GameRoom, playerId: string) {
         // If the impostor is no longer actively playing (disconnected, kicked or ejected),
         // crewmates win by attrition — signal this by setting ejectedId to impostorId
         const impostorActive = room.players.some(
-            (p) => p.id === room.impostorId && !p.isEjected && p.isConnected
+            (p) => p.id === room.impostorId && p.isConnected
         );
         room.ejectedId = impostorActive ? playerId : room.impostorId;
         return;
@@ -503,10 +503,7 @@ export function voteKickPlayer(
     if (voterId === targetId) return null;
 
     const voter = room.players.find((p) => p.id === voterId);
-    if (!voter || voter.isEjected || !voter.isConnected) return null;
-
-    const target = room.players.find((p) => p.id === targetId);
-    if (!target || target.isEjected) return null;
+    if (!voter || !voter.isConnected) return null;
 
     if (!room.kickVotes) room.kickVotes = {};
     if (!room.kickVotes[targetId]) room.kickVotes[targetId] = [];
@@ -514,7 +511,7 @@ export function voteKickPlayer(
     // Prune stale votes before evaluating
     room.kickVotes[targetId] = room.kickVotes[targetId].filter((vid) => {
         const v = room.players.find((p) => p.id === vid);
-        return v && v.isConnected && !v.isEjected;
+        return v && v.isConnected;
     });
 
     const votes = room.kickVotes[targetId];
@@ -529,7 +526,7 @@ export function voteKickPlayer(
     // Check if threshold is met
     // Threshold is all connected, non-ejected players EXCEPT the target
     const requiredVotes = room.players.filter(
-        (p) => p.isConnected && !p.isEjected && p.id !== targetId
+        (p) => p.isConnected && p.id !== targetId
     ).length;
 
     if (votes.length >= requiredVotes && requiredVotes > 0) {
