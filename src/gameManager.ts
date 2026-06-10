@@ -447,9 +447,7 @@ function executeKick(room: GameRoom, playerId: string) {
         return;
     }
 
-    const activePlayers = room.players.filter(
-        (p) => p.isConnected
-    );
+    const activePlayers = room.players.filter((p) => p.isConnected);
     if (activePlayers.length < 3) {
         room.phase = 'RESULTS';
         room.gameEnded = true;
