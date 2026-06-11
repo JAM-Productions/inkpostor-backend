@@ -18,10 +18,10 @@ The Inkpostor game supports two distinct types of player removal depending on th
 - **Phase:** `DRAWING`
 - **Trigger:** A player clicks the kick button next to another player's name in the UI.
 - **Rules:**
-  - Any connected, active player can initiate or add a vote against another.
+  - Any connected player (even if ejected in a previous round) can initiate or add a vote against another.
   - Votes act as a **toggle**: clicking again removes your vote.
-  - **Threshold required:** All connected, non-ejected players (except the target) must agree.
-    - Example: In a 4-player game with all active, 3 votes are required to kick someone.
+  - **Threshold required:** All connected players (except the target) must agree. (Ejected players who are connected count towards this threshold and can vote, while disconnected players are pruned/ignored).
+    - Example: In a 4-player room with all 4 players connected (even if one was ejected previously), 3 votes are required to kick someone.
 - **Outcome:**
   - The target is immediately removed from the `room.players` array.
   - The player's current turn is immediately skipped if they were drawing.
@@ -36,9 +36,9 @@ When a vote-kick successfully ejects a player, the server immediately evaluates 
 | Ejected Player Role | Impostor Status | Resulting State | Winning Team | Description |
 |---|---|---|---|---|
 | **Impostor** | N/A | `RESULTS` | 🟢 Crewmates | The Impostor was successfully identified and kicked. `ejectedId` is set to the Impostor's ID. |
-| **Crewmate** | Still active | `RESULTS` | 🔴 Impostor | A crewmate was wrongly kicked, and the total active player count dropped below 3. `ejectedId` is set to the kicked crewmate. The Impostor wins. |
-| **Crewmate** | Disconnected | `RESULTS` | 🟢 Crewmates | A crewmate was kicked, dropping the active count below 3, BUT the Impostor is no longer in the game. `ejectedId` is set to the Impostor's ID. Crewmates win by attrition. |
-| **Crewmate** | Active, players ≥ 3 | Phase continues | None (Game Continues) | A crewmate was kicked, but there are still enough players to continue the game. The turn advances to the next player. |
+| **Crewmate** | Still active | `RESULTS` | 🔴 Impostor | A crewmate was wrongly kicked, and the total connected player count dropped below 3. `ejectedId` is set to the kicked crewmate. The Impostor wins. |
+| **Crewmate** | Disconnected | `RESULTS` | 🟢 Crewmates | A crewmate was kicked, dropping the connected player count below 3, BUT the Impostor is no longer in the game. `ejectedId` is set to the Impostor's ID. Crewmates win by attrition. |
+| **Crewmate** | Active, connected players ≥ 3 | Phase continues | None (Game Continues) | A crewmate was kicked, but there are still enough connected players to continue the game. The turn advances to the next player. |
 
 ## Resetting the Kick Blocklist
 The in-memory blocklist (`kickedFromRoom`) is strictly scoped to a single game session.
