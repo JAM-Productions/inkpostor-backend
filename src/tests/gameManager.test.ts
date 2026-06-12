@@ -604,6 +604,24 @@ describe('gameManager', () => {
             expect(result!.turnOrder).toEqual(['p1']);
             expect(result!.currentTurnPlayerId).toBe('p1');
         });
+
+        it('should set phase to DRAWING when all connected, non-ejected players confirm (ignoring disconnected)', () => {
+            const room = createRoom('room-nextround-disconnected', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            p2.isConnected = false;
+            joinRoom('room-nextround-disconnected', p1);
+            joinRoom('room-nextround-disconnected', p2);
+
+            room.phase = 'RESULTS';
+            room.currentRound = 1;
+            room.players.find((p) => p.id === 'p1')!.hasVoted = true;
+            room.players.find((p) => p.id === 'p2')!.hasVoted = true;
+
+            const result = nextRound('room-nextround-disconnected', 'p1');
+            expect(result).not.toBeNull();
+            expect(result!.phase).toBe('DRAWING');
+        });
     });
 
     describe('endGame', () => {
@@ -1016,6 +1034,35 @@ describe('gameManager', () => {
             expect(
                 result!.players.find((p) => p.id === 'p2')!.isEjected
             ).toBeFalsy();
+        });
+
+        it('should allow an ejected player to vote to kick and be voted to kick', () => {
+            const room = createRoom('room-votekick-ejected', 'host1');
+            joinRoom('room-votekick-ejected', createPlayer('host1', 'Host'));
+            const p2 = createPlayer('p2', 'Bob');
+            p2.isEjected = true;
+            joinRoom('room-votekick-ejected', p2);
+            joinRoom('room-votekick-ejected', createPlayer('p3', 'Charlie'));
+
+            room.phase = 'DRAWING';
+            room.turnOrder = ['host1', 'p2', 'p3'];
+            room.turnIndex = 0;
+            room.currentTurnPlayerId = 'host1';
+
+            // p2 (ejected) votes to kick host1
+            let result = voteKickPlayer('room-votekick-ejected', 'p2', 'host1');
+            expect(result).not.toBeNull();
+            expect(result!.kickVotes['host1']).toEqual(['p2']);
+
+            // p3 votes to kick p2 (ejected)
+            result = voteKickPlayer('room-votekick-ejected', 'p3', 'p2');
+            expect(result).not.toBeNull();
+            expect(result!.kickVotes['p2']).toEqual(['p3']);
+
+            // host1 votes to kick p2 (ejected). Threshold is 2 (host1, p3 since p2 is target)
+            result = voteKickPlayer('room-votekick-ejected', 'host1', 'p2');
+            expect(result).not.toBeNull();
+            expect(result!.players.find((p) => p.id === 'p2')).toBeUndefined();
         });
     });
 

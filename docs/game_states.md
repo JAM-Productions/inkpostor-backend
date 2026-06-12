@@ -20,7 +20,7 @@ ROLE_REVEAL → DRAWING    (all players confirm their role)
 DRAWING → VOTING         (all turns used up, or emergency voting triggered)
 DRAWING → RESULTS        (vote-kick causes game-ending condition)
 VOTING → RESULTS         (all connected non-ejected players have voted)
-RESULTS → DRAWING        (next round, all players confirm — non-ejected only)
+RESULTS → DRAWING        (next round, all connected non-ejected players confirm)
 RESULTS → LOBBY          (host clicks Play Again)
 ```
 
@@ -32,8 +32,8 @@ RESULTS → LOBBY          (host clicks Play Again)
 |---|---|
 | Inkpostor ejected via voting (`ejectedId === impostorId`) | 🟢 **Crewmates win** — Inkpostor Defeated |
 | Inkpostor ejected via vote-kick (`ejectedId === impostorId`) | 🟢 **Crewmates win** — Inkpostor Defeated |
-| Crewmate kicked, impostor still active, active players < 3 | 🔴 **Inkpostor wins** |
-| Crewmate kicked, impostor disconnected / not in game, active players < 3 | 🟢 **Crewmates win** — impostor abandoned |
+| Crewmate kicked, impostor still active, connected players < 3 | 🔴 **Inkpostor wins** |
+| Crewmate kicked, impostor disconnected / not in game, connected players < 3 | 🟢 **Crewmates win** — impostor abandoned |
 | Host manually ends game (`endGame`) | 🔴 **Inkpostor wins** (`gameEnded = true`) |
 | Voting ends in a tie or everyone skips | ➡ Next round (`ejectedId = null`) |
 
@@ -44,12 +44,12 @@ RESULTS → LOBBY          (host clicks Play Again)
 ## Vote-Kick Mechanics (mid-game only)
 
 - Available during the `DRAWING` phase (not `LOBBY` or `VOTING`).
-- Any connected, non-ejected player can vote to kick another.
+- Any connected player (even if ejected in a previous round) can vote to kick another.
 - Votes are **toggleable** — clicking again removes your vote.
-- **Threshold**: all connected, non-ejected players except the target must agree.
+- **Threshold**: all connected players except the target must agree (ejected players who are connected count towards this threshold and can vote, while disconnected players are pruned/ignored).
 
 ```
-requiredVotes = connectedActivePlayers.count(id ≠ target)
+requiredVotes = connectedPlayers.count(id ≠ target)
 ```
 
 | Players | Target | Required Votes |
@@ -79,7 +79,7 @@ Once the threshold is met:
 
 ## Multi-Round Games
 
-- After `RESULTS`, non-ejected players can confirm to start the next round.
+- After `RESULTS`, connected non-ejected players can confirm to start the next round (disconnected players are ignored).
 - Ejected players wait silently (they cannot confirm or draw).
 - A new round resets: `votes`, `kickVotes`, `canvasStrokes`, `turnIndex`.
 - The impostor **remains the same** across rounds.
