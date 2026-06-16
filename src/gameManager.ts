@@ -1,9 +1,13 @@
 import { GameOptions, GameRoom, Player, StrokeData } from './types';
 import wordData from './data.json';
+import wordTranslations from './wordTranslations.json';
 import {
     ALLOWED_ROUND_TIMES,
+    DEFAULT_IMPOSTOR_GUESSES,
     DEFAULT_ROUND_TIME,
+    MAX_IMPOSTOR_GUESSES,
     MAX_NUM_PLAYERS_PER_ROOM,
+    MIN_IMPOSTOR_GUESSES,
 } from './constants';
 
 const rooms: Record<string, GameRoom> = {};
@@ -40,6 +44,19 @@ function sanitizeGameOptionsUpdate(
     if (typeof options.clearCanvasEachRound === 'boolean') {
         nextOptions.clearCanvasEachRound = options.clearCanvasEachRound;
     }
+    if (typeof options.impostorGuessEnabled === 'boolean') {
+        nextOptions.impostorGuessEnabled = options.impostorGuessEnabled;
+    }
+    if (
+        typeof options.impostorGuessAttempts === 'number' &&
+        Number.isFinite(options.impostorGuessAttempts)
+    ) {
+        const rounded = Math.round(options.impostorGuessAttempts);
+        nextOptions.impostorGuessAttempts = Math.min(
+            MAX_IMPOSTOR_GUESSES,
+            Math.max(MIN_IMPOSTOR_GUESSES, rounded)
+        );
+    }
 
     return nextOptions;
 }
@@ -67,7 +84,11 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
             roundTime: DEFAULT_ROUND_TIME,
             unlimitedInk: false,
             clearCanvasEachRound: true,
+            impostorGuessEnabled: false,
+            impostorGuessAttempts: DEFAULT_IMPOSTOR_GUESSES,
         },
+        impostorGuessesUsed: 0,
+        impostorGuessedCorrectly: false,
     };
     rooms[roomId] = newRoom;
     return newRoom;
@@ -154,6 +175,8 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     });
     room.ejectedId = null;
     room.gameEnded = false;
+    room.impostorGuessesUsed = 0;
+    room.impostorGuessedCorrectly = false;
 
     room.phase = 'ROLE_REVEAL';
     return room;
@@ -287,6 +310,15 @@ function checkVotingComplete(room: GameRoom) {
             room.ejectedId = ejectedId;
             const ejectedPlayer = room.players.find((p) => p.id === ejectedId);
             if (ejectedPlayer) ejectedPlayer.isEjected = true;
+            // If the impostor is ejected and the guess feature is on, give them
+            // one final chance to guess the word before the game resolves.
+            if (
+                ejectedId === room.impostorId &&
+                room.gameOptions.impostorGuessEnabled
+            ) {
+                room.phase = 'IMPOSTOR_GUESS';
+                return; // Defer RESULTS until the final guess is submitted/skipped
+            }
         }
         room.phase = 'RESULTS';
     }
@@ -314,6 +346,98 @@ export function castVote(
     return room;
 }
 
+// Case- and accent-insensitive normalization for word comparison.
+function normalizeWord(value: string): string {
+    return value.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+type TranslationMap = Record<string, Record<string, string>>;
+
+function resolveLanguage(language: unknown): string {
+    const translations = wordTranslations as TranslationMap;
+    if (typeof language !== 'string') return 'en';
+    // Accept region-tagged codes such as "es-ES" by taking the base language.
+    const base = language.split('-')[0].toLowerCase();
+    return base in translations ? base : 'en';
+}
+
+// The secret word is stored as its canonical English key. The impostor guesses
+// in the language they have selected, so we ONLY accept the translation for that
+// language.
+function isWordMatch(
+    guess: string,
+    secretWord: string | null,
+    language: string
+): boolean {
+    if (!secretWord) return false;
+    const normalizedGuess = normalizeWord(guess);
+    const translations = wordTranslations as TranslationMap;
+    const translated = translations[language]?.[secretWord];
+    return !!translated && normalizedGuess === normalizeWord(translated);
+
+    // To additionally accept the canonical English key as a fallback (e.g. for
+    // missing translations or words identical across languages), uncomment:
+    // return normalizedGuess === normalizeWord(secretWord);
+}
+
+export function submitImpostorGuess(
+    roomId: string,
+    playerId: string,
+    guess: unknown,
+    language: unknown
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room) return null;
+    // Only the impostor may guess, and only when the feature is enabled.
+    if (room.impostorId !== playerId) return null;
+    if (!room.gameOptions.impostorGuessEnabled) return null;
+    if (typeof guess !== 'string') return null;
+    const normalizedGuess = guess.trim();
+    if (!normalizedGuess) return null;
+
+    // The post-ejection final guess is its own phase (single shot, can skip).
+    const isFinalGuess = room.phase === 'IMPOSTOR_GUESS';
+    if (!isFinalGuess) {
+        // In-phase guess (DRAWING/VOTING), bounded by the shared attempt pool.
+        if (room.phase !== 'DRAWING' && room.phase !== 'VOTING') return null;
+        if (room.impostorGuessesUsed >= room.gameOptions.impostorGuessAttempts)
+            return null;
+        room.impostorGuessesUsed++;
+    }
+
+    if (
+        isWordMatch(normalizedGuess, room.secretWord, resolveLanguage(language))
+    ) {
+        // Correct guess: the impostor wins and the game ends immediately.
+        room.impostorGuessedCorrectly = true;
+        room.phase = 'RESULTS';
+        room.gameEnded = true;
+        return room;
+    }
+
+    // Wrong guess.
+    if (isFinalGuess) {
+        // The ejected impostor used their last chance -> crewmates win.
+        room.phase = 'RESULTS';
+        room.gameEnded = true;
+    }
+    return room;
+}
+
+export function skipImpostorGuess(
+    roomId: string,
+    playerId: string
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room) return null;
+    if (room.impostorId !== playerId) return null;
+    if (room.phase !== 'IMPOSTOR_GUESS') return null;
+    // The ejected impostor declined their final guess -> crewmates win.
+    room.phase = 'RESULTS';
+    room.gameEnded = true;
+    return room;
+}
+
 export function playAgain(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.hostId !== playerId) return null;
@@ -337,6 +461,8 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     });
     room.ejectedId = null;
     room.gameEnded = false;
+    room.impostorGuessesUsed = 0;
+    room.impostorGuessedCorrectly = false;
     // Clear the lobby-kick blocklist for a fresh game
     delete kickedFromRoom[roomId];
     return room;
@@ -452,7 +578,7 @@ function executeKick(room: GameRoom, playerId: string) {
         room.phase = 'RESULTS';
         room.gameEnded = true;
         // If the impostor is no longer actively playing (disconnected, kicked or ejected),
-        // crewmates win by attrition — signal this by setting ejectedId to impostorId
+        // crewmates win by attrition â€” signal this by setting ejectedId to impostorId
         const impostorActive = room.players.some(
             (p) => p.id === room.impostorId && p.isConnected
         );

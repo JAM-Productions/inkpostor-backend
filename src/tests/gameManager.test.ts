@@ -17,11 +17,14 @@ import {
     kickPlayer,
     voteKickPlayer,
     updateGameOptions,
+    submitImpostorGuess,
+    skipImpostorGuess,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import {
     ALLOWED_ROUND_TIMES,
     DEFAULT_ROUND_TIME,
+    MAX_IMPOSTOR_GUESSES,
     MAX_NUM_PLAYERS_PER_ROOM,
 } from '../constants';
 
@@ -47,6 +50,8 @@ describe('gameManager', () => {
                 roundTime: DEFAULT_ROUND_TIME,
                 unlimitedInk: false,
                 clearCanvasEachRound: true,
+                impostorGuessEnabled: false,
+                impostorGuessAttempts: 3,
             });
 
             const fetched = getRoom('room-create');
@@ -1081,6 +1086,8 @@ describe('gameManager', () => {
                 roundTime: 40,
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
+                impostorGuessEnabled: false,
+                impostorGuessAttempts: 3,
             });
         });
 
@@ -1104,6 +1111,8 @@ describe('gameManager', () => {
                 roundTime: 35,
                 unlimitedInk: true,
                 clearCanvasEachRound: true,
+                impostorGuessEnabled: false,
+                impostorGuessAttempts: 3,
             });
         });
 
@@ -1122,6 +1131,8 @@ describe('gameManager', () => {
                 roundTime: DEFAULT_ROUND_TIME,
                 unlimitedInk: true,
                 clearCanvasEachRound: true,
+                impostorGuessEnabled: false,
+                impostorGuessAttempts: 3,
             });
             expect('unexpected' in result!.gameOptions).toBe(false);
         });
@@ -1152,6 +1163,46 @@ describe('gameManager', () => {
                 expect(result).not.toBeNull();
                 expect(result!.gameOptions.roundTime).toBe(roundTime);
             }
+        });
+
+        it('should update impostorGuessEnabled', () => {
+            createRoom('room-options-guess-enabled', 'host1');
+
+            const result = updateGameOptions(
+                'room-options-guess-enabled',
+                'host1',
+                { impostorGuessEnabled: true }
+            );
+
+            expect(result!.gameOptions.impostorGuessEnabled).toBe(true);
+        });
+
+        it('should clamp impostorGuessAttempts to [1, 3] and round it', () => {
+            createRoom('room-options-attempts', 'host1');
+            const update = (value: unknown) =>
+                updateGameOptions('room-options-attempts', 'host1', {
+                    impostorGuessAttempts: value,
+                })!.gameOptions.impostorGuessAttempts;
+
+            expect(update(2)).toBe(2); // in range
+            expect(update(5)).toBe(3); // above max -> clamped
+            expect(update(0)).toBe(1); // below min -> clamped
+            expect(update(-4)).toBe(1); // negative -> clamped
+            expect(update(2.4)).toBe(2); // rounded down
+            expect(update(2.6)).toBe(3); // rounded up
+        });
+
+        it('should ignore a non-numeric impostorGuessAttempts', () => {
+            createRoom('room-options-attempts-invalid', 'host1');
+
+            const result = updateGameOptions(
+                'room-options-attempts-invalid',
+                'host1',
+                { impostorGuessAttempts: 'lots' }
+            );
+
+            // Falls back to the default (3) rather than corrupting the value.
+            expect(result!.gameOptions.impostorGuessAttempts).toBe(3);
         });
 
         it('should reject non-object payloads', () => {
@@ -1191,6 +1242,206 @@ describe('gameManager', () => {
                     clearCanvasEachRound: true,
                 })
             ).toBeNull();
+        });
+    });
+
+    describe('submitImpostorGuess & skipImpostorGuess', () => {
+        // Build a room ready for the impostor ('imp') to guess the word 'Dog'.
+        const setupGuessRoom = (id: string, word = 'Dog') => {
+            const room = createRoom(id, 'host1');
+            room.impostorId = 'imp';
+            room.secretWord = word;
+            room.secretCategory = 'Animals';
+            room.gameOptions.impostorGuessEnabled = true;
+            room.phase = 'DRAWING';
+            return room;
+        };
+
+        it('should accept the correct word in English', () => {
+            const room = setupGuessRoom('guess-en');
+            const result = submitImpostorGuess('guess-en', 'imp', 'Dog', 'en');
+            expect(result!.impostorGuessedCorrectly).toBe(true);
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+        });
+
+        it('should validate against the selected language (Spanish)', () => {
+            const room = setupGuessRoom('guess-es');
+            // The English word would be wrong when the player is on Spanish only
+            // if it were rejected, but the canonical key is also accepted; the
+            // important part is that the Spanish translation is accepted.
+            const result = submitImpostorGuess(
+                'guess-es',
+                'imp',
+                'Perro',
+                'es'
+            );
+            expect(result!.impostorGuessedCorrectly).toBe(true);
+            expect(room.phase).toBe('RESULTS');
+        });
+
+        it('should validate against the selected language (Catalan)', () => {
+            setupGuessRoom('guess-ca');
+            const result = submitImpostorGuess('guess-ca', 'imp', 'Gos', 'ca');
+            expect(result!.impostorGuessedCorrectly).toBe(true);
+        });
+
+        it('should be case-insensitive', () => {
+            setupGuessRoom('guess-case');
+            const result = submitImpostorGuess(
+                'guess-case',
+                'imp',
+                'PeRRo',
+                'es'
+            );
+            expect(result!.impostorGuessedCorrectly).toBe(true);
+        });
+
+        it('should be accent-insensitive', () => {
+            // Spanish for "Lion" is "León"; guessing "leon" should still match.
+            setupGuessRoom('guess-accent', 'Lion');
+            const result = submitImpostorGuess(
+                'guess-accent',
+                'imp',
+                'leon',
+                'es'
+            );
+            expect(result!.impostorGuessedCorrectly).toBe(true);
+        });
+
+        it('should reject a wrong guess and consume an attempt without ending the game', () => {
+            const room = setupGuessRoom('guess-wrong');
+            const result = submitImpostorGuess(
+                'guess-wrong',
+                'imp',
+                'Cat',
+                'en'
+            );
+            expect(result!.impostorGuessedCorrectly).toBe(false);
+            expect(result!.impostorGuessesUsed).toBe(1);
+            expect(result!.phase).toBe('DRAWING');
+            expect(room.gameEnded).toBe(false);
+        });
+
+        it('should reject another language word when it does not match the selection', () => {
+            // Secret 'Dog', player on English, guessing the Spanish word.
+            setupGuessRoom('guess-mismatch');
+            const result = submitImpostorGuess(
+                'guess-mismatch',
+                'imp',
+                'Perro',
+                'en'
+            );
+            expect(result!.impostorGuessedCorrectly).toBe(false);
+        });
+
+        it('should stop accepting guesses once the attempt pool is exhausted', () => {
+            const room = setupGuessRoom('guess-cap');
+            for (let i = 0; i < MAX_IMPOSTOR_GUESSES; i++) {
+                submitImpostorGuess('guess-cap', 'imp', 'Wrong', 'en');
+            }
+            expect(room.impostorGuessesUsed).toBe(MAX_IMPOSTOR_GUESSES);
+            expect(
+                submitImpostorGuess('guess-cap', 'imp', 'Dog', 'en')
+            ).toBeNull();
+            expect(room.impostorGuessedCorrectly).toBe(false);
+        });
+
+        it('should only let the impostor guess', () => {
+            setupGuessRoom('guess-not-impostor');
+            expect(
+                submitImpostorGuess(
+                    'guess-not-impostor',
+                    'someone',
+                    'Dog',
+                    'en'
+                )
+            ).toBeNull();
+        });
+
+        it('should return null when the feature is disabled', () => {
+            const room = setupGuessRoom('guess-disabled');
+            room.gameOptions.impostorGuessEnabled = false;
+            expect(
+                submitImpostorGuess('guess-disabled', 'imp', 'Dog', 'en')
+            ).toBeNull();
+        });
+
+        it('should default to English for an unknown language', () => {
+            setupGuessRoom('guess-unknown-lang');
+            const result = submitImpostorGuess(
+                'guess-unknown-lang',
+                'imp',
+                'Dog',
+                'fr'
+            );
+            expect(result!.impostorGuessedCorrectly).toBe(true);
+        });
+
+        it('should resolve the final ejected guess: correct wins', () => {
+            const room = setupGuessRoom('guess-final-win');
+            room.phase = 'IMPOSTOR_GUESS';
+            const result = submitImpostorGuess(
+                'guess-final-win',
+                'imp',
+                'Gos',
+                'ca'
+            );
+            expect(result!.impostorGuessedCorrectly).toBe(true);
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+        });
+
+        it('should resolve the final ejected guess: wrong ends the game for crewmates', () => {
+            const room = setupGuessRoom('guess-final-lose');
+            room.phase = 'IMPOSTOR_GUESS';
+            const result = submitImpostorGuess(
+                'guess-final-lose',
+                'imp',
+                'Cat',
+                'en'
+            );
+            expect(result!.impostorGuessedCorrectly).toBe(false);
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+            // The final guess is not bounded by the in-phase attempt pool.
+            expect(room.impostorGuessesUsed).toBe(0);
+        });
+
+        it('skipImpostorGuess should end the game in favour of the crewmates', () => {
+            const room = setupGuessRoom('guess-skip');
+            room.phase = 'IMPOSTOR_GUESS';
+            const result = skipImpostorGuess('guess-skip', 'imp');
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+            expect(result!.impostorGuessedCorrectly).toBe(false);
+        });
+
+        it('skipImpostorGuess should be a no-op when not in the final-guess phase', () => {
+            setupGuessRoom('guess-skip-invalid');
+            expect(skipImpostorGuess('guess-skip-invalid', 'imp')).toBeNull();
+        });
+
+        it('should move the ejected impostor into the IMPOSTOR_GUESS phase', () => {
+            const room = createRoom('guess-eject-phase', 'host1');
+            room.impostorId = 'imp';
+            room.secretWord = 'Dog';
+            room.gameOptions.impostorGuessEnabled = true;
+            room.phase = 'VOTING';
+            room.players = ['imp', 'p2', 'p3'].map((id) => ({
+                id,
+                name: id,
+                isConnected: true,
+                score: 0,
+                hasStartedEmergencyVoting: false,
+            }));
+            // Majority votes the impostor out.
+            castVote('guess-eject-phase', 'p2', 'imp');
+            castVote('guess-eject-phase', 'p3', 'imp');
+            castVote('guess-eject-phase', 'imp', 'p2');
+            expect(room.phase).toBe('IMPOSTOR_GUESS');
+            expect(room.gameEnded).toBe(false);
+            expect(room.ejectedId).toBe('imp');
         });
     });
 });
