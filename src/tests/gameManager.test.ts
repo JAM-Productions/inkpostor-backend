@@ -1258,6 +1258,7 @@ describe('gameManager', () => {
         };
 
         it('should accept the correct word in English', () => {
+            setupGuessRoom('guess-en');
             const result = submitImpostorGuess('guess-en', 'imp', 'Dog', 'en');
             expect(result!.impostorGuessedCorrectly).toBe(true);
             expect(result!.phase).toBe('RESULTS');
