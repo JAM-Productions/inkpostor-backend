@@ -578,7 +578,7 @@ function executeKick(room: GameRoom, playerId: string) {
         room.phase = 'RESULTS';
         room.gameEnded = true;
         // If the impostor is no longer actively playing (disconnected, kicked or ejected),
-        // crewmates win by attrition â€” signal this by setting ejectedId to impostorId
+        // crewmates win by attrition — signal this by setting ejectedId to impostorId
         const impostorActive = room.players.some(
             (p) => p.id === room.impostorId && p.isConnected
         );
