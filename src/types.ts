@@ -14,6 +14,7 @@ export type GamePhase =
     | 'ROLE_REVEAL'
     | 'DRAWING'
     | 'VOTING'
+    | 'IMPOSTOR_GUESS'
     | 'RESULTS';
 
 export interface Player {
@@ -39,6 +40,8 @@ export interface GameOptions {
     roundTime: number;
     unlimitedInk: boolean;
     clearCanvasEachRound: boolean;
+    impostorGuessEnabled: boolean;
+    impostorGuessAttempts: number;
 }
 
 export interface GameRoom {
@@ -59,6 +62,9 @@ export interface GameRoom {
     ejectedId: string | null;
     gameEnded: boolean;
     gameOptions: GameOptions;
+    // Impostor guess feature
+    impostorGuessesUsed: number; // In-phase guesses spent (DRAWING/VOTING), persists across rounds
+    impostorGuessedCorrectly: boolean; // True if the impostor won by guessing the word
 }
 
 export interface WordList {

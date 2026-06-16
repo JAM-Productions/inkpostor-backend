@@ -342,6 +342,73 @@ describe('Server API and Socket Integration Tests', () => {
             reconnectSocket.disconnect();
         }, 10_000);
 
+        it('re-sends roleAssignment when a player reconnects mid-game', async () => {
+            type Role = {
+                isImpostor: boolean;
+                secretWord: string | null;
+                secretCategory: string | null;
+            };
+
+            const roomId = 'reconnect-role-room';
+            const hostId = '00000000-0000-4000-8000-000000000031';
+            const p1Id = '00000000-0000-4000-8000-000000000032';
+            const p2Id = '00000000-0000-4000-8000-000000000033';
+            const hostToken = await getToken('RoleHost', hostId);
+            const p1Token = await getToken('RolePlayer1', p1Id);
+            const p2Token = await getToken('RolePlayer2', p2Id);
+
+            const hostSocket = await connectSocket(hostToken);
+            const p1Socket = await connectSocket(p1Token);
+            const p2Socket = await connectSocket(p2Token);
+
+            hostSocket.emit('createRoom', { roomId });
+            await waitForEvent(hostSocket, 'gameStateUpdate');
+            p1Socket.emit('joinRoom', { roomId });
+            await waitForEvent(p1Socket, 'gameStateUpdate');
+            p2Socket.emit('joinRoom', { roomId });
+            await waitForEvent(p2Socket, 'gameStateUpdate');
+
+            // Start the game and capture each player's private role assignment.
+            const roleEvents = Promise.all([
+                waitForEvent<Role>(hostSocket, 'roleAssignment'),
+                waitForEvent<Role>(p1Socket, 'roleAssignment'),
+                waitForEvent<Role>(p2Socket, 'roleAssignment'),
+            ]);
+            hostSocket.emit('startGame');
+            const [hostRole, p1Role, p2Role] = await roleEvents;
+
+            const participants = [
+                { socket: hostSocket, id: hostId, role: hostRole },
+                { socket: p1Socket, id: p1Id, role: p1Role },
+                { socket: p2Socket, id: p2Id, role: p2Role },
+            ];
+            const impostor = participants.find((p) => p.role.isImpostor)!;
+            expect(impostor).toBeDefined();
+
+            // The impostor drops and reconnects with the same UUID.
+            impostor.socket.disconnect();
+            await new Promise((r) => setTimeout(r, 100));
+
+            const reToken = await getToken('ReconnImpostor', impostor.id);
+            const reconnectSocket = await connectSocket(reToken);
+            const recoveredRolePromise = waitForEvent<Role>(
+                reconnectSocket,
+                'roleAssignment'
+            );
+            reconnectSocket.emit('joinRoom', { roomId });
+            const recoveredRole = await recoveredRolePromise;
+
+            // The reconnecting impostor recovers their role (so the
+            // IMPOSTOR_GUESS form renders again instead of the waiting screen).
+            expect(recoveredRole.isImpostor).toBe(true);
+            expect(recoveredRole.secretWord).toBeNull();
+
+            participants
+                .filter((p) => p.id !== impostor.id)
+                .forEach((p) => p.socket.disconnect());
+            reconnectSocket.disconnect();
+        }, 15_000);
+
         it('two players with same display name have separate player slots when UUIDs differ', async () => {
             const roomId = 'uuid-name-collision-isolated-room';
             const alice1Token = await getToken(
@@ -527,6 +594,8 @@ describe('Server API and Socket Integration Tests', () => {
                 roundTime: 40,
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
+                impostorGuessEnabled: false,
+                impostorGuessAttempts: 3,
             };
 
             hostSocket.emit('updateGameOptions', updatedOptions);
@@ -599,6 +668,8 @@ describe('Server API and Socket Integration Tests', () => {
                 roundTime: 20,
                 unlimitedInk: true,
                 clearCanvasEachRound: true,
+                impostorGuessEnabled: false,
+                impostorGuessAttempts: 3,
             });
             expect(playerState.gameOptions).toEqual(hostState.gameOptions);
 

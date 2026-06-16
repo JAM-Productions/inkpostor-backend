@@ -25,6 +25,8 @@ import {
     kickPlayer,
     voteKickPlayer,
     updateGameOptions,
+    submitImpostorGuess,
+    skipImpostorGuess,
 } from './gameManager';
 import { Player, StrokeData, UserPayload } from './types';
 
@@ -203,7 +205,22 @@ io.on('connection', (socket: Socket) => {
         if (joinedRoom) {
             socket.join(roomId);
             socketToRoom[socket.id] = roomId;
-            io.to(roomId).emit('gameStateUpdate', joinedRoom);
+            io.to(roomId).emit(
+                'gameStateUpdate',
+                getSanitizedRoomState(joinedRoom)
+            );
+
+            // If the player reconnected into an in-progress game, re-send their
+            // private role so they recover amIImpostor / secretWord / category
+            // (otherwise a page reload loses it — e.g. the IMPOSTOR_GUESS form).
+            if (joinedRoom.impostorId) {
+                const isImpostor = user.userId === joinedRoom.impostorId;
+                socket.emit('roleAssignment', {
+                    isImpostor,
+                    secretWord: isImpostor ? null : joinedRoom.secretWord,
+                    secretCategory: joinedRoom.secretCategory,
+                });
+            }
         } else {
             socket.emit('error', 'Cannot join room');
         }
@@ -288,6 +305,49 @@ io.on('connection', (socket: Socket) => {
                     getSanitizedRoomState(room)
                 );
             }
+        }
+    });
+
+    socket.on('submitImpostorGuess', (payload: unknown) => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const guess =
+            typeof payload === 'string'
+                ? payload
+                : isObjectWithGuess(payload)
+                  ? payload.guess
+                  : undefined;
+        const language = isObjectWithGuess(payload)
+            ? payload.language
+            : undefined;
+        const room = submitImpostorGuess(roomId, user.userId, guess, language);
+        if (!room) return;
+        if (room.phase === 'RESULTS') {
+            // Game ended (impostor guessed right, or used their final ejected guess):
+            // reveal full state to everyone.
+            io.to(roomId).emit('gameStateUpdate', room);
+        } else {
+            // Wrong in-phase guess: only the impostor needs the updated attempt
+            // count — avoid leaking guessing activity to the crewmates.
+            const targetSocketId = userIdToSocketId[user.userId];
+            if (targetSocketId) {
+                io.to(targetSocketId).emit(
+                    'gameStateUpdate',
+                    getSanitizedRoomState(room)
+                );
+            }
+        }
+    });
+
+    socket.on('skipImpostorGuess', () => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = skipImpostorGuess(roomId, user.userId);
+        if (room) {
+            // Game ends, crewmates win — reveal full state.
+            io.to(roomId).emit('gameStateUpdate', room);
         }
     });
 
@@ -452,6 +512,12 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
         impostorId: null, // Hidden
         secretWord: null, // Hidden
     };
+}
+
+function isObjectWithGuess(
+    value: unknown
+): value is { guess?: string; language?: string } {
+    return typeof value === 'object' && value !== null && 'guess' in value;
 }
 
 function generateToken(username: string, userId: string) {
