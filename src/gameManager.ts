@@ -310,14 +310,13 @@ function checkVotingComplete(room: GameRoom) {
             room.ejectedId = ejectedId;
             const ejectedPlayer = room.players.find((p) => p.id === ejectedId);
             if (ejectedPlayer) ejectedPlayer.isEjected = true;
-            // If the impostor is ejected and the guess feature is on, give them
-            // one final chance to guess the word before the game resolves.
-            if (
-                ejectedId === room.impostorId &&
-                room.gameOptions.impostorGuessEnabled
-            ) {
-                room.phase = 'IMPOSTOR_GUESS';
-                return; // Defer RESULTS until the final guess is submitted/skipped
+            if (ejectedId === room.impostorId) {
+                if (room.gameOptions.impostorGuessEnabled) {
+                    room.phase = 'IMPOSTOR_GUESS';
+                    return; // Defer RESULTS until the final guess is submitted/skipped
+                }
+                // Impostor ejected, crewmates win — game over
+                room.gameEnded = true;
             }
         }
         room.phase = 'RESULTS';

@@ -448,6 +448,49 @@ describe('gameManager', () => {
             expect(r2!.ejectedId).toBeNull();
         });
 
+        it('should set gameEnded=true when impostor is ejected by vote (guess feature off)', () => {
+            const room = createRoom('room-voting-impostor-ejected', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            joinRoom('room-voting-impostor-ejected', p1);
+            joinRoom('room-voting-impostor-ejected', p2);
+            joinRoom('room-voting-impostor-ejected', p3);
+
+            room.phase = 'VOTING';
+            room.impostorId = 'p3';
+            room.gameOptions.impostorGuessEnabled = false;
+
+            castVote('room-voting-impostor-ejected', 'p1', 'p3');
+            castVote('room-voting-impostor-ejected', 'p2', 'p3');
+            const result = castVote('room-voting-impostor-ejected', 'p3', 'p1');
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.ejectedId).toBe('p3');
+            expect(result!.gameEnded).toBe(true);
+        });
+
+        it('should NOT set gameEnded when a crewmate is ejected by vote', () => {
+            const room = createRoom('room-voting-crewmate-ejected', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            joinRoom('room-voting-crewmate-ejected', p1);
+            joinRoom('room-voting-crewmate-ejected', p2);
+            joinRoom('room-voting-crewmate-ejected', p3);
+
+            room.phase = 'VOTING';
+            room.impostorId = 'p1';
+
+            castVote('room-voting-crewmate-ejected', 'p1', 'p3');
+            castVote('room-voting-crewmate-ejected', 'p2', 'p3');
+            const result = castVote('room-voting-crewmate-ejected', 'p3', 'p1');
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.ejectedId).toBe('p3');
+            expect(result!.gameEnded).toBe(false);
+        });
+
         it('should only require votes from non-ejected connected players to complete voting & handle ties', () => {
             const room = createRoom('room-voting-majority', 'host1');
             const p1 = createPlayer('p1', 'Alice');
