@@ -12,7 +12,7 @@ This is the backend service for the Inkpostor application, built with Node.js, E
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) installed
-- npm or yarn
+- pnpm
 - Docker (optional, for containerization)
 
 ## Getting Started
@@ -20,7 +20,7 @@ This is the backend service for the Inkpostor application, built with Node.js, E
 1. **Install dependencies:**
 
     ```bash
-    npm install
+    pnpm install
     ```
 
 2. **Environment Variables:**
@@ -33,7 +33,7 @@ This is the backend service for the Inkpostor application, built with Node.js, E
 3. **Run the development server:**
 
     ```bash
-    npm run dev
+    pnpm dev
     ```
 
     The development server will start using Node's native `--watch` mode and auto-reload on file changes.
@@ -54,12 +54,12 @@ docker run -p 3001:3001 --env-file .env inkpostor-backend
 
 ## Scripts
 
-- `npm run dev` - Starts the development server using Node native watch mode.
-- `npm run build` - Transpiles the TypeScript code to JavaScript.
-- `npm run start` - Runs the built JavaScript application.
-- `npm run test` - Runs the tests using Vitest.
-- `npm run format` - Formats the codebase using pre-configured Prettier settings.
-- `npm run check-format` - Checks if the codebase is correctly formatted.
+- `pnpm dev` - Starts the development server using Node native watch mode.
+- `pnpm build` - Transpiles the TypeScript code to JavaScript.
+- `pnpm start` - Runs the built JavaScript application.
+- `pnpm test` - Runs the tests using Vitest.
+- `pnpm format` - Formats the codebase using pre-configured Prettier settings.
+- `pnpm check-format` - Checks if the codebase is correctly formatted.
 
 ## Tech Stack
 
