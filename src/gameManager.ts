@@ -624,6 +624,8 @@ export function voteKickPlayer(
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (voterId === targetId) return null;
+    // The host cannot be voted out
+    if (targetId === room.hostId) return null;
 
     const voter = room.players.find((p) => p.id === voterId);
     if (!voter || !voter.isConnected) return null;
