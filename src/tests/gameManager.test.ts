@@ -1097,10 +1097,10 @@ describe('gameManager', () => {
             room.turnIndex = 0;
             room.currentTurnPlayerId = 'host1';
 
-            // p2 (ejected) votes to kick host1
-            let result = voteKickPlayer('room-votekick-ejected', 'p2', 'host1');
+            // p2 (ejected) votes to kick p3
+            let result = voteKickPlayer('room-votekick-ejected', 'p2', 'p3');
             expect(result).not.toBeNull();
-            expect(result!.kickVotes['host1']).toEqual(['p2']);
+            expect(result!.kickVotes['p3']).toEqual(['p2']);
 
             // p3 votes to kick p2 (ejected)
             result = voteKickPlayer('room-votekick-ejected', 'p3', 'p2');
@@ -1111,6 +1111,25 @@ describe('gameManager', () => {
             result = voteKickPlayer('room-votekick-ejected', 'host1', 'p2');
             expect(result).not.toBeNull();
             expect(result!.players.find((p) => p.id === 'p2')).toBeUndefined();
+        });
+
+        it('should return null when trying to vote-kick the host', () => {
+            const room = createRoom('room-votekick-host', 'host1');
+            joinRoom('room-votekick-host', createPlayer('host1', 'Host'));
+            joinRoom('room-votekick-host', createPlayer('p2', 'Bob'));
+            joinRoom('room-votekick-host', createPlayer('p3', 'Charlie'));
+
+            room.phase = 'DRAWING';
+            room.turnOrder = ['host1', 'p2', 'p3'];
+            room.turnIndex = 0;
+            room.currentTurnPlayerId = 'host1';
+
+            const result = voteKickPlayer('room-votekick-host', 'p2', 'host1');
+
+            expect(result).toBeNull();
+            expect(
+                getRoom('room-votekick-host')!.kickVotes['host1']
+            ).toBeUndefined();
         });
     });
 
