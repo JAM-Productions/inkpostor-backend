@@ -1127,7 +1127,9 @@ describe('gameManager', () => {
             const result = voteKickPlayer('room-votekick-host', 'p2', 'host1');
 
             expect(result).toBeNull();
-            expect(getRoom('room-votekick-host')!.kickVotes['host1']).toBeUndefined();
+            expect(
+                getRoom('room-votekick-host')!.kickVotes['host1']
+            ).toBeUndefined();
         });
     });
 
