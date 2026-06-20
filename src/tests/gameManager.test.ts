@@ -194,9 +194,7 @@ describe('gameManager', () => {
             const room = createRoom('disc-voting', 'host1');
             room.impostorId = 'p1'; // ejected p3 will be a crewmate
             room.phase = 'VOTING';
-            room.players = ['p1', 'p2', 'p3'].map((id) =>
-                createPlayer(id, id)
-            );
+            room.players = ['p1', 'p2', 'p3'].map((id) => createPlayer(id, id));
 
             // Everyone votes for p3 except p3, who never votes.
             castVote('disc-voting', 'p1', 'p3');
@@ -257,9 +255,7 @@ describe('gameManager', () => {
             room.phase = 'RESULTS';
             room.gameEnded = false;
             room.ejectedId = null;
-            room.players = ['p1', 'p2', 'p3'].map((id) =>
-                createPlayer(id, id)
-            );
+            room.players = ['p1', 'p2', 'p3'].map((id) => createPlayer(id, id));
             room.turnOrder = ['p1', 'p2', 'p3'];
 
             nextRound('disc-results', 'p1');
