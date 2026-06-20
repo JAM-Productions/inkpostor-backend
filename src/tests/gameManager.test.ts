@@ -189,6 +189,122 @@ describe('gameManager', () => {
         });
     });
 
+    describe('leaveRoom phase transitions (disconnect)', () => {
+        it('VOTING: resolves the round when the last non-voter disconnects', () => {
+            const room = createRoom('disc-voting', 'host1');
+            room.impostorId = 'p1'; // ejected p3 will be a crewmate
+            room.phase = 'VOTING';
+            room.players = ['p1', 'p2', 'p3'].map((id) => createPlayer(id, id));
+
+            // Everyone votes for p3 except p3, who never votes.
+            castVote('disc-voting', 'p1', 'p3');
+            castVote('disc-voting', 'p2', 'p3');
+            expect(room.phase).toBe('VOTING'); // still waiting on p3
+
+            // p3 drops without voting -> the round must now resolve.
+            leaveRoom('disc-voting', 'p3');
+
+            expect(room.phase).toBe('RESULTS');
+            expect(room.ejectedId).toBe('p3');
+        });
+
+        it('VOTING: impostor disconnecting instead of voting ends the game (no orphaned IMPOSTOR_GUESS)', () => {
+            const room = createRoom('disc-voting-imp', 'host1');
+            room.impostorId = 'imp';
+            room.secretWord = 'Dog';
+            room.gameOptions.impostorGuessEnabled = true;
+            room.phase = 'VOTING';
+            room.players = ['imp', 'p2', 'p3'].map((id) =>
+                createPlayer(id, id)
+            );
+
+            // Crewmates vote the impostor out; the impostor never votes.
+            castVote('disc-voting-imp', 'p2', 'imp');
+            castVote('disc-voting-imp', 'p3', 'imp');
+            expect(room.phase).toBe('VOTING'); // still waiting on the impostor
+
+            // The impostor drops without voting -> it would resolve into
+            // IMPOSTOR_GUESS, but a disconnected impostor can never guess.
+            leaveRoom('disc-voting-imp', 'imp');
+
+            expect(room.phase).toBe('RESULTS');
+            expect(room.gameEnded).toBe(true);
+            expect(room.ejectedId).toBe('imp');
+        });
+
+        it('VOTING: impostor disconnecting still goes to IMPOSTOR_GUESS if guess option is off -> game ends', () => {
+            const room = createRoom('disc-voting-imp-off', 'host1');
+            room.impostorId = 'imp';
+            room.phase = 'VOTING';
+            room.players = ['imp', 'p2', 'p3'].map((id) =>
+                createPlayer(id, id)
+            );
+
+            castVote('disc-voting-imp-off', 'p2', 'imp');
+            castVote('disc-voting-imp-off', 'p3', 'imp');
+            leaveRoom('disc-voting-imp-off', 'imp');
+
+            // Guess option off: checkVotingComplete already ends the game.
+            expect(room.phase).toBe('RESULTS');
+            expect(room.gameEnded).toBe(true);
+            expect(room.ejectedId).toBe('imp');
+        });
+
+        it('RESULTS: starts the next round when the last unconfirmed player disconnects', () => {
+            const room = createRoom('disc-results', 'host1');
+            room.phase = 'RESULTS';
+            room.gameEnded = false;
+            room.ejectedId = null;
+            room.players = ['p1', 'p2', 'p3'].map((id) => createPlayer(id, id));
+            room.turnOrder = ['p1', 'p2', 'p3'];
+
+            nextRound('disc-results', 'p1');
+            nextRound('disc-results', 'p2');
+            expect(room.phase).toBe('RESULTS'); // still waiting on p3
+
+            // p3 drops -> disconnected players count as confirmed.
+            leaveRoom('disc-results', 'p3');
+
+            expect(room.phase).toBe('DRAWING');
+            expect(room.currentRound).toBe(2);
+        });
+
+        it('IMPOSTOR_GUESS: the impostor disconnecting counts as a surrender (crewmates win)', () => {
+            const room = createRoom('disc-guess', 'host1');
+            room.impostorId = 'imp';
+            room.ejectedId = 'imp';
+            room.phase = 'IMPOSTOR_GUESS';
+            room.gameEnded = false;
+            room.players = ['imp', 'p2', 'p3'].map((id) =>
+                createPlayer(id, id)
+            );
+            room.players.find((p) => p.id === 'imp')!.isEjected = true;
+
+            leaveRoom('disc-guess', 'imp');
+
+            expect(room.phase).toBe('RESULTS');
+            expect(room.gameEnded).toBe(true);
+            expect(room.ejectedId).toBe('imp');
+        });
+
+        it('IMPOSTOR_GUESS: a waiting crewmate disconnecting does not end the game', () => {
+            const room = createRoom('disc-guess-crew', 'host1');
+            room.impostorId = 'imp';
+            room.ejectedId = 'imp';
+            room.phase = 'IMPOSTOR_GUESS';
+            room.gameEnded = false;
+            room.players = ['imp', 'p2', 'p3'].map((id) =>
+                createPlayer(id, id)
+            );
+            room.players.find((p) => p.id === 'imp')!.isEjected = true;
+
+            leaveRoom('disc-guess-crew', 'p2');
+
+            expect(room.phase).toBe('IMPOSTOR_GUESS');
+            expect(room.gameEnded).toBe(false);
+        });
+    });
+
     describe('startGame', () => {
         it('should return null if room not found or not enough players', () => {
             createRoom('room-start-fail', 'host1');
