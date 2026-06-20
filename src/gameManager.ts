@@ -122,19 +122,40 @@ export function joinRoom(roomId: string, player: Player): GameRoom | null {
     return room;
 }
 
-export function leaveRoom(roomId: string, playerId: string) {
+export function leaveRoom(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
-    if (!room) return;
+    if (!room) return null;
     const playerIndex = room.players.findIndex((p) => p.id === playerId);
-    if (playerIndex !== -1) {
-        if (room.phase === 'LOBBY') {
-            room.players.splice(playerIndex, 1);
-        } else {
-            room.players[playerIndex].isConnected = false;
+    if (playerIndex === -1) return room;
+
+    if (room.phase === 'LOBBY') {
+        room.players.splice(playerIndex, 1);
+        return room;
+    }
+
+    room.players[playerIndex].isConnected = false;
+
+    // Re-evaluate phase transitions so the game doesn't hang when the player who
+    // was holding up the current phase drops out.
+    switch (room.phase) {
+        case 'VOTING':
+            checkVotingComplete(room);
+            break;
+        case 'RESULTS':
+            if (!room.gameEnded) checkAllConfirmedNewRound(room);
+            break;
+    }
+
+    if (room.phase === 'IMPOSTOR_GUESS') {
+        const impostor = room.players.find((p) => p.id === room.impostorId);
+        if (!impostor || !impostor.isConnected) {
+            room.phase = 'RESULTS';
+            room.gameEnded = true;
         }
     }
 
-    // If no players are connected, we could delete the room after a timeout, but for MVP we just keep it
+    //NOTE: If no players are connected, we could delete the room after a timeout
+    return room;
 }
 
 export function startGame(roomId: string, playerId: string): GameRoom | null {
@@ -467,39 +488,45 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     return room;
 }
 
+// Starts the next round once every active (connected, non-ejected) player has
+// confirmed. Disconnected and ejected players are treated as already confirmed.
+function checkAllConfirmedNewRound(room: GameRoom) {
+    const allConfirmed = room.players.every(
+        (p) => p.isEjected || !p.isConnected || p.hasConfirmedNewRound
+    );
+    if (!allConfirmed) return;
+
+    room.phase = 'DRAWING';
+    room.currentRound++;
+    room.turnOrder = room.turnOrder.filter((id) => {
+        const player = room.players.find((p) => p.id === id);
+        return player && !player.isEjected;
+    });
+    if (room.turnOrder.length === 0) {
+        room.currentTurnPlayerId = null;
+    } else {
+        room.currentTurnPlayerId = room.turnOrder[0];
+    }
+    room.turnIndex = 0;
+    room.votes = {};
+    room.kickVotes = {};
+    room.players.forEach((p) => {
+        p.hasVoted = false;
+        p.hasConfirmedNewRound = false;
+    });
+    room.ejectedId = null;
+    if (room.gameOptions.clearCanvasEachRound) {
+        room.canvasStrokes = [];
+    }
+}
+
 export function nextRound(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'RESULTS' || room.gameEnded) return null;
     const player = room.players.find((p) => p.id === playerId);
     if (!player || player.isEjected) return null;
     player.hasConfirmedNewRound = true;
-    const allConfirmed = room.players.every(
-        (p) => p.isEjected || !p.isConnected || p.hasConfirmedNewRound
-    );
-    if (allConfirmed) {
-        room.phase = 'DRAWING';
-        room.currentRound++;
-        room.turnOrder = room.turnOrder.filter((id) => {
-            const player = room.players.find((p) => p.id === id);
-            return player && !player.isEjected;
-        });
-        if (room.turnOrder.length === 0) {
-            room.currentTurnPlayerId = null;
-        } else {
-            room.currentTurnPlayerId = room.turnOrder[0];
-        }
-        room.turnIndex = 0;
-        room.votes = {};
-        room.kickVotes = {};
-        room.players.forEach((p) => {
-            p.hasVoted = false;
-            p.hasConfirmedNewRound = false;
-        });
-        room.ejectedId = null;
-        if (room.gameOptions.clearCanvasEachRound) {
-            room.canvasStrokes = [];
-        }
-    }
+    checkAllConfirmedNewRound(room);
     return room;
 }
 

@@ -29,6 +29,25 @@ RESULTS → DRAWING            (next round, all connected non-ejected players co
 RESULTS → LOBBY              (host clicks Play Again)
 ```
 
+### Disconnect-driven transitions
+
+A player dropping (socket `disconnect`, or leaving by switching rooms) is handled
+in `leaveRoom`. In `LOBBY` the player is removed; otherwise they are marked
+`isConnected = false`. Because a disconnected player no longer counts towards the
+phase's completion condition, the phase is **re-evaluated immediately** so the
+game never hangs waiting on someone who left:
+
+```
+VOTING → RESULTS / IMPOSTOR_GUESS   (last expected voter disconnects → the vote resolves)
+IMPOSTOR_GUESS → RESULTS            (the impostor disconnects → counts as a surrender, crewmates win)
+RESULTS → DRAWING                   (last unconfirmed player disconnects → next round starts)
+```
+
+> A disconnected impostor can never make a final guess. So if a `VOTING`
+> resolution would push a now-disconnected impostor into `IMPOSTOR_GUESS`, it is
+> short-circuited straight to `RESULTS` (surrender). In every surrender path
+> `ejectedId` is already `impostorId`, so the result reads as 🟢 Crewmates win.
+
 ---
 
 ## Win / Loss Conditions
@@ -43,6 +62,7 @@ RESULTS → LOBBY              (host clicks Play Again)
 | Voting ends in a tie or everyone skips | ➡ Next round (`ejectedId = null`) |
 | Inkpostor guesses the secret word (any phase: DRAWING / VOTING / IMPOSTOR_GUESS) | 🔴 **Inkpostor wins** (`impostorGuessedCorrectly = true`) |
 | Inkpostor ejected, then fails or skips their final guess | 🟢 **Crewmates win** — Inkpostor Defeated |
+| Inkpostor disconnects while ejected and owing a final guess (in `IMPOSTOR_GUESS`, or a `VOTING` resolution that would enter it) | 🟢 **Crewmates win** — counts as a surrender (`ejectedId === impostorId`) |
 
 > **Active player** = `isConnected && !isEjected`
 
