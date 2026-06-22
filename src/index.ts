@@ -29,6 +29,7 @@ import {
     skipImpostorGuess,
 } from './gameManager';
 import { Player, StrokeData, UserPayload } from './types';
+import wordTranslations from './wordTranslations.json';
 
 dotenv.config();
 
@@ -109,7 +110,7 @@ function leaveCurrentRoom(socket: Socket) {
         leaveRoom(roomId, user.userId);
         const room = getRoom(roomId);
         if (room) {
-            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+            broadcastGameState(roomId);
         }
         socket.leave(roomId);
         delete socketToRoom[socket.id];
@@ -167,7 +168,7 @@ io.on('connection', (socket: Socket) => {
         userIdToSocketId[connectingUser.userId] = socket.id;
     }
 
-    socket.on('createRoom', ({ roomId }) => {
+    socket.on('createRoom', ({ roomId, language }) => {
         const user = socket.user;
         leaveCurrentRoom(socket);
         createRoom(roomId, user.userId);
@@ -177,16 +178,17 @@ io.on('connection', (socket: Socket) => {
             isConnected: true,
             score: 0,
             hasStartedEmergencyVoting: false,
+            language: typeof language === 'string' ? language : 'en',
         };
         const room = joinRoom(roomId, player);
         if (room) {
             socket.join(roomId);
             socketToRoom[socket.id] = roomId;
-            io.to(roomId).emit('gameStateUpdate', room);
+            broadcastGameState(roomId);
         }
     });
 
-    socket.on('joinRoom', ({ roomId }) => {
+    socket.on('joinRoom', ({ roomId, language }) => {
         const user = socket.user;
         leaveCurrentRoom(socket);
         let room = getRoom(roomId);
@@ -200,25 +202,29 @@ io.on('connection', (socket: Socket) => {
             isConnected: true,
             score: 0,
             hasStartedEmergencyVoting: false,
+            language: typeof language === 'string' ? language : 'en',
         };
         const joinedRoom = joinRoom(roomId, player);
         if (joinedRoom) {
             socket.join(roomId);
             socketToRoom[socket.id] = roomId;
-            io.to(roomId).emit(
-                'gameStateUpdate',
-                getSanitizedRoomState(joinedRoom)
-            );
+            broadcastGameState(roomId);
 
             // If the player reconnected into an in-progress game, re-send their
             // private role so they recover amIImpostor / secretWord / category
             // (otherwise a page reload loses it — e.g. the IMPOSTOR_GUESS form).
             if (joinedRoom.impostorId) {
                 const isImpostor = user.userId === joinedRoom.impostorId;
+                const playerLanguage = player.language || 'en';
                 socket.emit('roleAssignment', {
                     isImpostor,
-                    secretWord: isImpostor ? null : joinedRoom.secretWord,
-                    secretCategory: joinedRoom.secretCategory,
+                    secretWord: isImpostor
+                        ? null
+                        : translateWord(joinedRoom.secretWord, playerLanguage),
+                    secretCategory: translateWord(
+                        joinedRoom.secretCategory,
+                        playerLanguage
+                    ),
                 });
             }
         } else {
@@ -233,17 +239,23 @@ io.on('connection', (socket: Socket) => {
         const room = startGame(roomId, user.userId);
         if (room) {
             // Send global state to everyone EXCEPT the secret word and impostor status
-            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+            broadcastGameState(roomId);
 
             // Send private roles directly to each player's socket
             room.players.forEach((p) => {
                 const targetSocketId = userIdToSocketId[p.id];
                 if (!targetSocketId) return;
                 const isImpostor = p.id === room.impostorId;
+                const playerLanguage = p.language || 'en';
                 io.to(targetSocketId).emit('roleAssignment', {
                     isImpostor,
-                    secretWord: isImpostor ? null : room.secretWord,
-                    secretCategory: room.secretCategory,
+                    secretWord: isImpostor
+                        ? null
+                        : translateWord(room.secretWord, playerLanguage),
+                    secretCategory: translateWord(
+                        room.secretCategory,
+                        playerLanguage
+                    ),
                 });
             });
         }
@@ -255,7 +267,7 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = proceedToDrawing(roomId, user.userId);
         if (room) {
-            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+            broadcastGameState(roomId);
         }
     });
 
@@ -286,7 +298,7 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = nextTurn(roomId, user.userId);
         if (room) {
-            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+            broadcastGameState(roomId);
         }
     });
 
@@ -296,15 +308,7 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = castVote(roomId, user.userId, votedForId);
         if (room) {
-            if (room.phase === 'RESULTS') {
-                // Send full unsanitized state so everyone sees the impostor
-                io.to(roomId).emit('gameStateUpdate', room);
-            } else {
-                io.to(roomId).emit(
-                    'gameStateUpdate',
-                    getSanitizedRoomState(room)
-                );
-            }
+            broadcastGameState(roomId);
         }
     });
 
@@ -326,17 +330,11 @@ io.on('connection', (socket: Socket) => {
         if (room.phase === 'RESULTS') {
             // Game ended (impostor guessed right, or used their final ejected guess):
             // reveal full state to everyone.
-            io.to(roomId).emit('gameStateUpdate', room);
+            broadcastGameState(roomId);
         } else {
             // Wrong in-phase guess: only the impostor needs the updated attempt
             // count — avoid leaking guessing activity to the crewmates.
-            const targetSocketId = userIdToSocketId[user.userId];
-            if (targetSocketId) {
-                io.to(targetSocketId).emit(
-                    'gameStateUpdate',
-                    getSanitizedRoomState(room)
-                );
-            }
+            emitGameStateToPlayer(roomId, user.userId);
         }
     });
 
@@ -347,7 +345,7 @@ io.on('connection', (socket: Socket) => {
         const room = skipImpostorGuess(roomId, user.userId);
         if (room) {
             // Game ends, crewmates win — reveal full state.
-            io.to(roomId).emit('gameStateUpdate', room);
+            broadcastGameState(roomId);
         }
     });
 
@@ -357,7 +355,7 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = playAgain(roomId, user.userId);
         if (room) {
-            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+            broadcastGameState(roomId);
         }
     });
 
@@ -367,7 +365,7 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = nextRound(roomId, user.userId);
         if (room) {
-            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+            broadcastGameState(roomId);
         }
     });
 
@@ -377,7 +375,7 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = endGame(roomId, user.userId);
         if (room) {
-            io.to(roomId).emit('gameStateUpdate', room);
+            broadcastGameState(roomId);
         }
     });
 
@@ -387,7 +385,7 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = startEmergencyVoting(roomId, user.userId);
         if (room) {
-            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+            broadcastGameState(roomId);
         }
     });
 
@@ -423,10 +421,7 @@ io.on('connection', (socket: Socket) => {
                     }
                 }
 
-                io.to(roomId).emit(
-                    'gameStateUpdate',
-                    getSanitizedRoomState(room)
-                );
+                broadcastGameState(roomId);
             }
         }
     );
@@ -471,10 +466,7 @@ io.on('connection', (socket: Socket) => {
                     }
                 }
 
-                io.to(roomId).emit(
-                    'gameStateUpdate',
-                    getSanitizedRoomState(room)
-                );
+                broadcastGameState(roomId);
             }
         }
     );
@@ -485,7 +477,37 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = updateGameOptions(roomId, user.userId, options);
         if (room) {
-            io.to(roomId).emit('gameStateUpdate', getSanitizedRoomState(room));
+            broadcastGameState(roomId);
+        }
+    });
+
+    socket.on('setLanguage', ({ language }) => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = getRoom(roomId);
+        if (room) {
+            const player = room.players.find((p) => p.id === user.userId);
+            if (player) {
+                player.language =
+                    typeof language === 'string' ? language : 'en';
+                // Resend the state update custom-translated for this player
+                emitGameStateToPlayer(roomId, user.userId);
+                // Also send their private role again so they get the secretWord/secretCategory in the new language!
+                if (room.impostorId) {
+                    const isImpostor = user.userId === room.impostorId;
+                    socket.emit('roleAssignment', {
+                        isImpostor,
+                        secretWord: isImpostor
+                            ? null
+                            : translateWord(room.secretWord, player.language),
+                        secretCategory: translateWord(
+                            room.secretCategory,
+                            player.language
+                        ),
+                    });
+                }
+            }
         }
     });
 
@@ -512,6 +534,56 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
         impostorId: null, // Hidden
         secretWord: null, // Hidden
     };
+}
+
+type TranslationMap = Record<string, Record<string, string>>;
+
+function translateWord(word: string | null, language: string): string | null {
+    if (!word) return null;
+    const translations = wordTranslations as TranslationMap;
+    const baseLanguage = language.split('-')[0].toLowerCase();
+    const langDict = translations[baseLanguage] || translations['en'];
+    return langDict[word] || word;
+}
+
+function getTranslatedRoomState(
+    room: ReturnType<typeof getRoom>,
+    language: string
+) {
+    if (!room) return null;
+    const sanitized = getSanitizedRoomState(room);
+    if (!sanitized) return null;
+
+    return {
+        ...sanitized,
+        secretWord: sanitized.secretWord
+            ? translateWord(sanitized.secretWord, language)
+            : null,
+        secretCategory: sanitized.secretCategory
+            ? translateWord(sanitized.secretCategory, language)
+            : null,
+    };
+}
+
+function emitGameStateToPlayer(roomId: string, playerId: string) {
+    const room = getRoom(roomId);
+    if (!room) return;
+    const socketId = userIdToSocketId[playerId];
+    if (!socketId) return;
+    const player = room.players.find((p) => p.id === playerId);
+    const language = player?.language || 'en';
+    io.to(socketId).emit(
+        'gameStateUpdate',
+        getTranslatedRoomState(room, language)
+    );
+}
+
+function broadcastGameState(roomId: string) {
+    const room = getRoom(roomId);
+    if (!room) return;
+    room.players.forEach((p) => {
+        emitGameStateToPlayer(roomId, p.id);
+    });
 }
 
 function isObjectWithGuess(
