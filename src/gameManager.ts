@@ -111,6 +111,9 @@ export function joinRoom(roomId: string, player: Player): GameRoom | null {
     );
     if (existingPlayerIndex >= 0) {
         room.players[existingPlayerIndex].isConnected = true;
+        if (player.language) {
+            room.players[existingPlayerIndex].language = player.language;
+        }
     } else {
         // Cannot join mid-game unless reconnecting
         if (room.phase !== 'LOBBY') return null;
