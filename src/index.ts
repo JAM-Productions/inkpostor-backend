@@ -218,9 +218,17 @@ io.on('connection', (socket: Socket) => {
             // If the player reconnected into an in-progress game, re-send their
             // private role so they recover amIImpostor / secretWord / category
             // (otherwise a page reload loses it — e.g. the IMPOSTOR_GUESS form).
-            // In WORD_SELECTION the word isn't picked yet, so it is sent again
-            // for everyone once the phase resolves.
-            if (joinedRoom.impostorId) {
+            //
+            // Not during WORD_SELECTION: the impostor is already picked there,
+            // but the game hasn't revealed anything yet, so handing a client its
+            // role would let whoever reconnects read it off the socket ahead of
+            // everyone else. There is nothing to recover at that point anyway —
+            // the word doesn't exist yet, and roles reach everybody when the
+            // phase resolves.
+            if (
+                joinedRoom.impostorId &&
+                joinedRoom.phase !== 'WORD_SELECTION'
+            ) {
                 const joinedPlayer =
                     joinedRoom.players.find((p) => p.id === user.userId) ??
                     player;
@@ -523,7 +531,9 @@ io.on('connection', (socket: Socket) => {
                 // Resend the state update custom-translated for this player
                 emitGameStateToPlayer(roomId, user.userId);
                 // Also send their private role again so they get the secretWord/secretCategory in the new language!
-                if (room.impostorId) {
+                // Skipped in WORD_SELECTION for the same reason as on rejoin:
+                // nothing is revealed yet, and there is no word to re-translate.
+                if (room.impostorId && room.phase !== 'WORD_SELECTION') {
                     socket.emit(
                         'roleAssignment',
                         buildRoleAssignment(room, player)

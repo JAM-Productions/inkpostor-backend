@@ -845,6 +845,74 @@ describe('Server API and Socket Integration Tests', () => {
         }, 20_000);
     });
 
+    it('should not hand out roles while the players are still writing their word', async () => {
+        const roomId = 'word-selection-reconnect-room';
+        const userIds = [
+            '00000000-0000-4000-8000-000000000050',
+            '00000000-0000-4000-8000-000000000051',
+            '00000000-0000-4000-8000-000000000052',
+        ];
+        const tokens = await Promise.all(
+            userIds.map((userId, index) => getToken(`RejoinP${index}`, userId))
+        );
+        const sockets = await Promise.all(tokens.map(connectSocket));
+        const [hostSocket] = sockets;
+
+        const roomCreated = waitForEvent<GameRoom>(
+            hostSocket,
+            'gameStateUpdate'
+        );
+        hostSocket.emit('createRoom', { roomId });
+        await roomCreated;
+
+        for (const s of sockets.slice(1)) {
+            const joined = waitForEvent<GameRoom>(s, 'gameStateUpdate');
+            s.emit('joinRoom', { roomId });
+            await joined;
+        }
+
+        hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        hostSocket.emit('startGame');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(getRoom(roomId)!.phase).toBe('WORD_SELECTION');
+
+        // A player reloads the page mid-writing: the replacement connection
+        // drops the previous socket, so let that settle before rejoining.
+        const reconnected = await connectSocket(tokens[1]);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        let roleAssignments = 0;
+        reconnected.on('roleAssignment', () => roleAssignments++);
+
+        const rejoined = waitForEvent<GameRoom>(reconnected, 'gameStateUpdate');
+        reconnected.emit('joinRoom', { roomId });
+        expect((await rejoined).phase).toBe('WORD_SELECTION');
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // Their role exists on the server already, but the game has revealed
+        // nothing yet — so nothing about it may reach the client.
+        expect(roleAssignments).toBe(0);
+
+        // Same for a language change, which goes through the same branch
+        reconnected.emit('setLanguage', { language: 'es' });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(roleAssignments).toBe(0);
+
+        // Once the phase resolves, they do get their role like everyone else
+        const activeSockets = [sockets[0], reconnected, sockets[2]];
+        for (const s of activeSockets) {
+            s.emit('submitCustomWord', { word: 'Lighthouse' });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(getRoom(roomId)!.phase).toBe('ROLE_REVEAL');
+        expect(roleAssignments).toBe(1);
+
+        activeSockets.forEach((s) => s.disconnect());
+    }, 20_000);
+
     describe('Socket Hot Word Flow', () => {
         interface RoleAssignment {
             isImpostor: boolean;
