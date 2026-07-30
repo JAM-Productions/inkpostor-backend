@@ -11,6 +11,21 @@ field on the room. It survives `playAgain`.
 |---|---|
 | `CLASSIC` | Default. The secret word is drawn at random from the built-in word list. |
 | `CUSTOM_WORD` | Every player writes a word in `WORD_SELECTION`; one of them becomes the secret word, under the `Special` category. |
+| `HOT_WORD` | Words come from the built-in list as in `CLASSIC`, but a **new one is drawn every round**. The impostor stays the same, so each round starts on `WORD_REVEAL` instead of going straight to `DRAWING`. |
+
+Some modes take an option over. While such a mode is selected the value is
+forced and the host cannot change it — `setGameMode` applies it and
+`updateGameOptions` keeps re-applying it, so a modified client cannot get around
+it. `MODE_LOCKED_OPTIONS` (in `constants.ts`) is the single source of truth,
+mirrored by the options modal in the client:
+
+| Mode | Locked option | Why |
+|---|---|---|
+| `CUSTOM_WORD` | `impostorGuessEnabled: false` | The word is written by a player, so it could simply be handed to the impostor. |
+| `HOT_WORD` | `clearCanvasEachRound: true` | Every round has a new word, so keeping the previous drawing makes no sense. |
+
+Switching back to a mode without the lock leaves the forced value in place; the
+host can then change it again.
 
 ## Game Phases
 
@@ -19,6 +34,7 @@ field on the room. It survives `playAgain`.
 | `LOBBY` | Players join the room. Host can kick players. Game hasn't started. |
 | `WORD_SELECTION` | `CUSTOM_WORD` mode only. Every player writes and confirms a word. Reached instead of `ROLE_REVEAL` when the game starts. |
 | `ROLE_REVEAL` | Players see their role (Inkpostor or Crewmate). Must confirm before proceeding. |
+| `WORD_REVEAL` | `HOT_WORD` mode only. Players see the new word of the round (the impostor, only its category) and confirm. Roles are not shown again — they haven't changed. |
 | `DRAWING` | Players take turns drawing on the canvas. Vote-kick is available. |
 | `VOTING` | All players vote on who they think the Inkpostor is (or skip). |
 | `IMPOSTOR_GUESS` | The ejected Inkpostor gets one final guess at the secret word. Everyone else waits. Only reached when the impostor-guess option is enabled. |
@@ -41,8 +57,17 @@ VOTING → RESULTS             (impostor guesses the word correctly — impostor
 VOTING → IMPOSTOR_GUESS      (impostor ejected by vote AND the impostor-guess option is enabled)
 IMPOSTOR_GUESS → RESULTS     (impostor submits their final guess, or skips it)
 RESULTS → DRAWING            (next round, all connected non-ejected players confirm)
+RESULTS → WORD_REVEAL        (same, in HOT_WORD mode — a new word is drawn)
+WORD_REVEAL → DRAWING        (all non-ejected players confirm the new word)
 RESULTS → LOBBY              (host clicks Play Again)
 ```
+
+> `ROLE_REVEAL` and `WORD_REVEAL` wait for **every** non-ejected player, including
+> disconnected ones: nobody starts drawing until everyone still in the game has
+> seen the word, even if that means waiting for a reconnection (the host can
+> always end the game). Ejected players may watch the reveal — they are never
+> the impostor, since ejecting the impostor ends the game — but are not waited
+> for.
 
 ### Disconnect-driven transitions
 
@@ -132,6 +157,7 @@ Once the threshold is met:
 - Ejected players wait silently (they cannot confirm or draw).
 - A new round resets: `votes`, `kickVotes`, `canvasStrokes`, `turnIndex`.
 - The impostor **remains the same** across rounds.
+- In `HOT_WORD` the round also draws a new word (excluding `room.usedWords`, which tracks the words already played and is only cleared on `startGame` / `playAgain`) and enters `WORD_REVEAL`. The impostor-guess pool is **not** reset — it stays a per-game budget.
 - `impostorId` is hidden from clients until phase = `RESULTS`.
 
 ---
@@ -221,6 +247,7 @@ lobby, and only available in `CLASSIC` mode (see Custom Word Mode above):
 | `startGame` | LOBBY | Host starts the game (host only) |
 | `submitCustomWord` | WORD_SELECTION | Player submits their word (payload: `{ word }`) |
 | `proceedToDrawing` | ROLE_REVEAL | Player confirms role |
+| `confirmNewWord` | WORD_REVEAL | Player confirms they have seen the new word of the round |
 | `drawStroke` | DRAWING | Current turn player draws a stroke |
 | `undoStroke` | DRAWING | Current turn player undoes last stroke |
 | `endTurn` | DRAWING | Current turn player ends their turn |

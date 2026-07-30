@@ -29,6 +29,7 @@ import {
     skipImpostorGuess,
     setGameMode,
     submitCustomWord,
+    confirmNewWord,
 } from './gameManager';
 import { GameRoom, Player, StrokeData, UserPayload } from './types';
 import wordTranslations from './wordTranslations.json';
@@ -112,7 +113,9 @@ function leaveCurrentRoom(socket: Socket) {
         leaveRoom(roomId, user.userId);
         const room = getRoom(roomId);
         if (room) {
-            broadcastGameState(roomId);
+            // Dropping out can resolve a phase (e.g. the last player pending to
+            // confirm the next round), which in HOT_WORD means a new word.
+            broadcastRoomUpdate(roomId);
         }
         socket.leave(roomId);
         delete socketToRoom[socket.id];
@@ -237,15 +240,10 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = startGame(roomId, user.userId);
         if (room) {
-            // Send global state to everyone EXCEPT the secret word and impostor status
-            broadcastGameState(roomId);
-
-            // Send private roles directly to each player's socket. In CUSTOM_WORD
-            // mode the game starts in WORD_SELECTION and there is no word yet, so
-            // roles are only revealed once the players have chosen it.
-            if (room.phase === 'ROLE_REVEAL') {
-                emitRoleAssignments(room);
-            }
+            // Private roles first, then the sanitised state for everyone. In
+            // CUSTOM_WORD mode the game starts in WORD_SELECTION and there is no
+            // word yet, so roles are only revealed once the players choose it.
+            broadcastRoomUpdate(roomId);
         }
     });
 
@@ -277,11 +275,8 @@ io.on('connection', (socket: Socket) => {
                   : undefined;
         const room = submitCustomWord(roomId, user.userId, word);
         if (!room) return;
-        broadcastGameState(roomId);
-        // The last word resolved the phase — everyone can now learn their role.
-        if (room.phase === 'ROLE_REVEAL') {
-            emitRoleAssignments(room);
-        }
+        // The last word resolves the phase — everyone then learns their role.
+        broadcastRoomUpdate(roomId);
     });
 
     socket.on('proceedToDrawing', () => {
@@ -289,6 +284,16 @@ io.on('connection', (socket: Socket) => {
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = proceedToDrawing(roomId, user.userId);
+        if (room) {
+            broadcastGameState(roomId);
+        }
+    });
+
+    socket.on('confirmNewWord', () => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = confirmNewWord(roomId, user.userId);
         if (room) {
             broadcastGameState(roomId);
         }
@@ -388,7 +393,8 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = nextRound(roomId, user.userId);
         if (room) {
-            broadcastGameState(roomId);
+            // In HOT_WORD the new round starts on WORD_REVEAL with a fresh word.
+            broadcastRoomUpdate(roomId);
         }
     });
 
@@ -593,8 +599,8 @@ function buildRoleAssignment(room: GameRoom, player: Player) {
     };
 }
 
-// Sends every player their private role. Used when the game reaches ROLE_REVEAL,
-// on reconnection, and when a player switches language.
+// Sends every player their private role. Used when the game reaches a reveal
+// phase, on reconnection, and when a player switches language.
 function emitRoleAssignments(room: GameRoom) {
     room.players.forEach((p) => {
         const targetSocketId = userIdToSocketId[p.id];
@@ -604,6 +610,24 @@ function emitRoleAssignments(room: GameRoom) {
             buildRoleAssignment(room, p)
         );
     });
+}
+
+// Broadcasts a room whose phase may have just changed. Several events can land
+// on a reveal phase (starting the game, the last custom word, confirming the
+// next round, and even a disconnect resolving one of those), and the secret word
+// only travels in `roleAssignment` — so it is emitted here rather than left to
+// each handler to remember.
+//
+// Roles go out BEFORE the state on purpose: the client switches screens on the
+// state update, so it must already hold the new word by then. Otherwise the
+// reveal screen would briefly show the previous round's word.
+function broadcastRoomUpdate(roomId: string) {
+    const room = getRoom(roomId);
+    if (!room) return;
+    if (room.phase === 'ROLE_REVEAL' || room.phase === 'WORD_REVEAL') {
+        emitRoleAssignments(room);
+    }
+    broadcastGameState(roomId);
 }
 
 function getTranslatedRoomState(

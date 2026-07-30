@@ -845,6 +845,108 @@ describe('Server API and Socket Integration Tests', () => {
         }, 20_000);
     });
 
+    describe('Socket Hot Word Flow', () => {
+        interface RoleAssignment {
+            isImpostor: boolean;
+            secretWord: string | null;
+            secretCategory: string | null;
+        }
+
+        it('should reveal a new word every round, before announcing the phase', async () => {
+            const roomId = 'hot-word-socket-room';
+            const userIds = [
+                '00000000-0000-4000-8000-000000000040',
+                '00000000-0000-4000-8000-000000000041',
+                '00000000-0000-4000-8000-000000000042',
+            ];
+            const sockets = await Promise.all(
+                userIds.map(async (userId, index) =>
+                    connectSocket(await getToken(`HotP${index}`, userId))
+                )
+            );
+            const [hostSocket] = sockets;
+
+            const roomCreated = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            for (const s of sockets.slice(1)) {
+                const joined = waitForEvent<GameRoom>(s, 'gameStateUpdate');
+                s.emit('joinRoom', { roomId });
+                await joined;
+            }
+
+            hostSocket.emit('setGameMode', { gameMode: 'HOT_WORD' });
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            const firstRoles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            hostSocket.emit('startGame');
+            await Promise.all(firstRoles);
+            const firstWord = getRoom(roomId)!.secretWord;
+            const impostorId = getRoom(roomId)!.impostorId;
+
+            // Skip the round itself and jump straight to the results screen
+            getRoom(roomId)!.phase = 'RESULTS';
+
+            for (const s of sockets.slice(0, -1)) {
+                s.emit('nextRound');
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('RESULTS');
+
+            // Record the order in which the last player sees both events
+            const sequence: string[] = [];
+            const last = sockets[sockets.length - 1];
+            last.on('roleAssignment', () => sequence.push('roleAssignment'));
+            last.on('gameStateUpdate', (state: GameRoom) =>
+                sequence.push(`gameStateUpdate:${state.phase}`)
+            );
+
+            const newRoles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            last.emit('nextRound');
+            const assignments = await Promise.all(newRoles);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            const room = getRoom(roomId)!;
+            expect(room.phase).toBe('WORD_REVEAL');
+            expect(room.currentRound).toBe(2);
+            expect(room.secretWord).not.toBe(firstWord);
+            expect(room.impostorId).toBe(impostorId);
+
+            // The word must land before the phase that shows it on screen,
+            // otherwise the reveal renders the previous round's word.
+            expect(sequence).toEqual([
+                'roleAssignment',
+                'gameStateUpdate:WORD_REVEAL',
+            ]);
+
+            assignments.forEach((assignment, index) => {
+                expect(assignment.secretCategory).not.toBeNull();
+                if (userIds[index] === impostorId) {
+                    expect(assignment.secretWord).toBeNull();
+                } else {
+                    expect(assignment.secretWord).toBe(room.secretWord);
+                }
+            });
+
+            // Everyone confirms the new word and the round starts
+            for (const s of sockets) {
+                s.emit('confirmNewWord');
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('DRAWING');
+
+            sockets.forEach((s) => s.disconnect());
+        }, 20_000);
+    });
+
     describe('Socket Kick Player Flow', () => {
         const getToken = async (username: string, userId: string) => {
             const res = await request(app)
