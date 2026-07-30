@@ -263,7 +263,8 @@
         "Fire Truck": "Fire Truck",
         "Ambulance": "Ambulance",
         "Taxi": "Taxi",
-        "Truck": "Truck"
+        "Truck": "Truck",
+        "Special": "Special"
     },
     "es": {
         "Dog": "Perro",
@@ -529,7 +530,8 @@
         "Fire Truck": "Camión de Bomberos",
         "Ambulance": "Ambulancia",
         "Taxi": "Taxi",
-        "Truck": "Camión"
+        "Truck": "Camión",
+        "Special": "Especial"
     },
     "ca": {
         "Dog": "Gos",
@@ -795,6 +797,7 @@
         "Fire Truck": "Camió de Bombers",
         "Ambulance": "Ambulància",
         "Taxi": "Taxi",
-        "Truck": "Camió"
+        "Truck": "Camió",
+        "Special": "Especial"
     }
 }

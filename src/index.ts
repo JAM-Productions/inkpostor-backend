@@ -27,8 +27,10 @@ import {
     updateGameOptions,
     submitImpostorGuess,
     skipImpostorGuess,
+    setGameMode,
+    submitCustomWord,
 } from './gameManager';
-import { Player, StrokeData, UserPayload } from './types';
+import { GameRoom, Player, StrokeData, UserPayload } from './types';
 import wordTranslations from './wordTranslations.json';
 
 dotenv.config();
@@ -213,19 +215,16 @@ io.on('connection', (socket: Socket) => {
             // If the player reconnected into an in-progress game, re-send their
             // private role so they recover amIImpostor / secretWord / category
             // (otherwise a page reload loses it — e.g. the IMPOSTOR_GUESS form).
+            // In WORD_SELECTION the word isn't picked yet, so it is sent again
+            // for everyone once the phase resolves.
             if (joinedRoom.impostorId) {
-                const isImpostor = user.userId === joinedRoom.impostorId;
-                const playerLanguage = player.language || 'en';
-                socket.emit('roleAssignment', {
-                    isImpostor,
-                    secretWord: isImpostor
-                        ? null
-                        : translateWord(joinedRoom.secretWord, playerLanguage),
-                    secretCategory: translateWord(
-                        joinedRoom.secretCategory,
-                        playerLanguage
-                    ),
-                });
+                const joinedPlayer =
+                    joinedRoom.players.find((p) => p.id === user.userId) ??
+                    player;
+                socket.emit(
+                    'roleAssignment',
+                    buildRoleAssignment(joinedRoom, joinedPlayer)
+                );
             }
         } else {
             socket.emit('error', 'Cannot join room');
@@ -241,23 +240,47 @@ io.on('connection', (socket: Socket) => {
             // Send global state to everyone EXCEPT the secret word and impostor status
             broadcastGameState(roomId);
 
-            // Send private roles directly to each player's socket
-            room.players.forEach((p) => {
-                const targetSocketId = userIdToSocketId[p.id];
-                if (!targetSocketId) return;
-                const isImpostor = p.id === room.impostorId;
-                const playerLanguage = p.language || 'en';
-                io.to(targetSocketId).emit('roleAssignment', {
-                    isImpostor,
-                    secretWord: isImpostor
-                        ? null
-                        : translateWord(room.secretWord, playerLanguage),
-                    secretCategory: translateWord(
-                        room.secretCategory,
-                        playerLanguage
-                    ),
-                });
-            });
+            // Send private roles directly to each player's socket. In CUSTOM_WORD
+            // mode the game starts in WORD_SELECTION and there is no word yet, so
+            // roles are only revealed once the players have chosen it.
+            if (room.phase === 'ROLE_REVEAL') {
+                emitRoleAssignments(room);
+            }
+        }
+    });
+
+    socket.on('setGameMode', (payload: unknown) => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const mode =
+            typeof payload === 'string'
+                ? payload
+                : isObjectWithGameMode(payload)
+                  ? payload.gameMode
+                  : undefined;
+        const room = setGameMode(roomId, user.userId, mode);
+        if (room) {
+            broadcastGameState(roomId);
+        }
+    });
+
+    socket.on('submitCustomWord', (payload: unknown) => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const word =
+            typeof payload === 'string'
+                ? payload
+                : isObjectWithWord(payload)
+                  ? payload.word
+                  : undefined;
+        const room = submitCustomWord(roomId, user.userId, word);
+        if (!room) return;
+        broadcastGameState(roomId);
+        // The last word resolved the phase — everyone can now learn their role.
+        if (room.phase === 'ROLE_REVEAL') {
+            emitRoleAssignments(room);
         }
     });
 
@@ -495,17 +518,10 @@ io.on('connection', (socket: Socket) => {
                 emitGameStateToPlayer(roomId, user.userId);
                 // Also send their private role again so they get the secretWord/secretCategory in the new language!
                 if (room.impostorId) {
-                    const isImpostor = user.userId === room.impostorId;
-                    socket.emit('roleAssignment', {
-                        isImpostor,
-                        secretWord: isImpostor
-                            ? null
-                            : translateWord(room.secretWord, player.language),
-                        secretCategory: translateWord(
-                            room.secretCategory,
-                            player.language
-                        ),
-                    });
+                    socket.emit(
+                        'roleAssignment',
+                        buildRoleAssignment(room, player)
+                    );
                 }
             }
         }
@@ -521,16 +537,29 @@ io.on('connection', (socket: Socket) => {
     });
 });
 
+// The words players submit in CUSTOM_WORD mode never leave the server: they are
+// the pool the secret word is drawn from, so broadcasting them would hand the
+// impostor the answer (and reveal who wrote it). Clients only need the flag.
+function withoutCustomWords(room: GameRoom) {
+    return {
+        ...room,
+        players: room.players.map(({ customWord: _customWord, ...player }) => ({
+            ...player,
+            hasSubmittedWord: !!player.hasSubmittedWord,
+        })),
+    };
+}
+
 // Helper to hide secrets from general state updates
 function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     if (!room) return null;
-    // If game is over, reveal everything
-    if (room.phase === 'RESULTS') return room;
+    // If game is over, reveal everything (except the unused custom words)
+    if (room.phase === 'RESULTS') return withoutCustomWords(room);
     // Ensure only authenticated user data is exposed
     // (socket user info is attached in middleware; no secret data here)
 
     return {
-        ...room,
+        ...withoutCustomWords(room),
         impostorId: null, // Hidden
         secretWord: null, // Hidden
     };
@@ -546,6 +575,37 @@ function translateWord(word: string | null, language: string): string | null {
     return langDict[word] || word;
 }
 
+// A player-written word must be shown exactly as typed: it isn't a translation
+// key, and translating a word that happens to collide with one (e.g. "Dog")
+// would show a different word than the one the server matches guesses against.
+function translateSecretWord(room: GameRoom, language: string): string | null {
+    if (room.gameMode === 'CUSTOM_WORD') return room.secretWord;
+    return translateWord(room.secretWord, language);
+}
+
+function buildRoleAssignment(room: GameRoom, player: Player) {
+    const isImpostor = player.id === room.impostorId;
+    const language = player.language || 'en';
+    return {
+        isImpostor,
+        secretWord: isImpostor ? null : translateSecretWord(room, language),
+        secretCategory: translateWord(room.secretCategory, language),
+    };
+}
+
+// Sends every player their private role. Used when the game reaches ROLE_REVEAL,
+// on reconnection, and when a player switches language.
+function emitRoleAssignments(room: GameRoom) {
+    room.players.forEach((p) => {
+        const targetSocketId = userIdToSocketId[p.id];
+        if (!targetSocketId) return;
+        io.to(targetSocketId).emit(
+            'roleAssignment',
+            buildRoleAssignment(room, p)
+        );
+    });
+}
+
 function getTranslatedRoomState(
     room: ReturnType<typeof getRoom>,
     language: string
@@ -557,7 +617,7 @@ function getTranslatedRoomState(
     return {
         ...sanitized,
         secretWord: sanitized.secretWord
-            ? translateWord(sanitized.secretWord, language)
+            ? translateSecretWord(room, language)
             : null,
         secretCategory: sanitized.secretCategory
             ? translateWord(sanitized.secretCategory, language)
@@ -590,6 +650,14 @@ function isObjectWithGuess(
     value: unknown
 ): value is { guess?: string; language?: string } {
     return typeof value === 'object' && value !== null && 'guess' in value;
+}
+
+function isObjectWithGameMode(value: unknown): value is { gameMode?: unknown } {
+    return typeof value === 'object' && value !== null && 'gameMode' in value;
+}
+
+function isObjectWithWord(value: unknown): value is { word?: unknown } {
+    return typeof value === 'object' && value !== null && 'word' in value;
 }
 
 function generateToken(username: string, userId: string) {

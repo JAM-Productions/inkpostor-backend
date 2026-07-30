@@ -11,11 +11,16 @@ declare module 'socket.io' {
 
 export type GamePhase =
     | 'LOBBY'
+    | 'WORD_SELECTION'
     | 'ROLE_REVEAL'
     | 'DRAWING'
     | 'VOTING'
     | 'IMPOSTOR_GUESS'
     | 'RESULTS';
+
+// CLASSIC: the secret word is drawn from the built-in word list.
+// CUSTOM_WORD: every player writes a word and one of them becomes the secret.
+export type GameMode = 'CLASSIC' | 'CUSTOM_WORD';
 
 export interface Player {
     id: string; // Socket ID or UUID
@@ -28,6 +33,9 @@ export interface Player {
     hasConfirmedNewRound?: boolean;
     hasStartedEmergencyVoting: boolean;
     language?: string;
+    // CUSTOM_WORD mode only. Never broadcast to clients (see getSanitizedRoomState).
+    customWord?: string | null;
+    hasSubmittedWord?: boolean;
 }
 
 export interface StrokeData {
@@ -63,6 +71,9 @@ export interface GameRoom {
     ejectedId: string | null;
     gameEnded: boolean;
     gameOptions: GameOptions;
+    // Kept out of gameOptions on purpose: the mode is applied immediately when the
+    // host moves the lobby carousel, while gameOptions are staged until confirmed.
+    gameMode: GameMode;
     // Impostor guess feature
     impostorGuessesUsed: number; // In-phase guesses spent (DRAWING/VOTING), persists across rounds
     impostorGuessedCorrectly: boolean; // True if the impostor won by guessing the word

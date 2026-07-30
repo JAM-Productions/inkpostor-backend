@@ -1,13 +1,18 @@
-import { GameOptions, GameRoom, Player, StrokeData } from './types';
+import { GameMode, GameOptions, GameRoom, Player, StrokeData } from './types';
 import wordData from './data.json';
 import wordTranslations from './wordTranslations.json';
 import {
     ALLOWED_ROUND_TIMES,
+    DEFAULT_GAME_MODE,
     DEFAULT_IMPOSTOR_GUESSES,
     DEFAULT_ROUND_TIME,
+    GAME_MODES,
+    MAX_CUSTOM_WORD_LENGTH,
     MAX_IMPOSTOR_GUESSES,
     MAX_NUM_PLAYERS_PER_ROOM,
+    MIN_CUSTOM_WORD_LENGTH,
     MIN_IMPOSTOR_GUESSES,
+    SPECIAL_CATEGORY,
 } from './constants';
 
 const rooms: Record<string, GameRoom> = {};
@@ -17,9 +22,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+// The impostor guess makes no sense in CUSTOM_WORD: the word is written by a
+// player, so the impostor could simply be told it. The option is forced off for
+// that mode and cannot be turned back on while it is selected.
+function supportsImpostorGuess(gameMode: GameMode): boolean {
+    return gameMode !== 'CUSTOM_WORD';
+}
+
 function sanitizeGameOptionsUpdate(
     options: unknown,
-    currentOptions: GameOptions
+    currentOptions: GameOptions,
+    gameMode: GameMode
 ): GameOptions | null {
     if (!isPlainObject(options)) return null;
 
@@ -58,6 +71,10 @@ function sanitizeGameOptionsUpdate(
         );
     }
 
+    if (!supportsImpostorGuess(gameMode)) {
+        nextOptions.impostorGuessEnabled = false;
+    }
+
     return nextOptions;
 }
 
@@ -87,6 +104,7 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
             impostorGuessEnabled: false,
             impostorGuessAttempts: DEFAULT_IMPOSTOR_GUESSES,
         },
+        gameMode: DEFAULT_GAME_MODE,
         impostorGuessesUsed: 0,
         impostorGuessedCorrectly: false,
     };
@@ -140,6 +158,11 @@ export function leaveRoom(roomId: string, playerId: string): GameRoom | null {
 
     // Re-evaluate phase transitions so the game doesn't hang when the player who
     // was holding up the current phase drops out.
+    //
+    // WORD_SELECTION is deliberately excluded: a drop must never advance the
+    // phase there, or a flaky connection would rush everyone out of the form
+    // before they finish typing. The phase is only re-evaluated when someone
+    // actually submits a word.
     switch (room.phase) {
         case 'VOTING':
             checkVotingComplete(room);
@@ -161,6 +184,17 @@ export function leaveRoom(roomId: string, playerId: string): GameRoom | null {
     return room;
 }
 
+function pickRandom<T>(items: T[]): T {
+    return items[Math.floor(Math.random() * items.length)];
+}
+
+// Draws a word (and its category) from the built-in word list.
+function assignRandomWord(room: GameRoom) {
+    const category = pickRandom(wordData.categories);
+    room.secretCategory = category.name;
+    room.secretWord = pickRandom(category.words);
+}
+
 export function startGame(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.hostId !== playerId || room.players.length < 3)
@@ -169,15 +203,6 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     // Pick Impostor
     const impostorIndex = Math.floor(Math.random() * room.players.length);
     room.impostorId = room.players[impostorIndex].id;
-
-    // Pick Word
-    const categoryIndex = Math.floor(
-        Math.random() * wordData.categories.length
-    );
-    const category = wordData.categories[categoryIndex];
-    const wordIndex = Math.floor(Math.random() * category.words.length);
-    room.secretCategory = category.name;
-    room.secretWord = category.words[wordIndex];
 
     // Setup Turns
     room.turnOrder = room.players
@@ -196,13 +221,93 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
         p.hasRevealedRole = false;
         p.hasConfirmedNewRound = false;
         p.hasStartedEmergencyVoting = false;
+        p.customWord = null;
+        p.hasSubmittedWord = false;
     });
     room.ejectedId = null;
     room.gameEnded = false;
     room.impostorGuessesUsed = 0;
     room.impostorGuessedCorrectly = false;
 
+    if (room.gameMode === 'CUSTOM_WORD') {
+        // The word comes from the players, so it isn't known yet.
+        room.secretWord = null;
+        room.secretCategory = null;
+        room.phase = 'WORD_SELECTION';
+        return room;
+    }
+
+    assignRandomWord(room);
     room.phase = 'ROLE_REVEAL';
+    return room;
+}
+
+export function setGameMode(
+    roomId: string,
+    userId: string,
+    mode: unknown
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.phase !== 'LOBBY') return null;
+    if (room.hostId !== userId) return null;
+    if (!GAME_MODES.includes(mode as GameMode)) return null;
+    room.gameMode = mode as GameMode;
+    // Switching into a mode that doesn't support the impostor guess turns the
+    // option off instead of leaving a setting the mode would ignore.
+    if (!supportsImpostorGuess(room.gameMode)) {
+        room.gameOptions.impostorGuessEnabled = false;
+    }
+    return room;
+}
+
+// Resolves WORD_SELECTION once every player who can still answer has submitted.
+// Disconnected players are skipped so a player who left cannot block the phase
+// forever, but this only ever runs on an actual submission — never on a
+// disconnect — so dropping out can't push the phase forward by itself.
+function checkAllCustomWordsSubmitted(room: GameRoom) {
+    const allSubmitted = room.players.every(
+        (p) => !p.isConnected || p.hasSubmittedWord
+    );
+    if (!allSubmitted) return;
+
+    // The impostor must not be able to win by having their own word drawn, so
+    // their submission is excluded from the pool.
+    const candidates = room.players
+        .filter((p) => p.id !== room.impostorId && p.customWord)
+        .map((p) => p.customWord as string);
+
+    if (candidates.length > 0) {
+        room.secretWord = pickRandom(candidates);
+        room.secretCategory = SPECIAL_CATEGORY;
+    } else {
+        // Nobody but the impostor supplied a word — fall back to the word list so
+        // the game can still run.
+        assignRandomWord(room);
+    }
+
+    room.phase = 'ROLE_REVEAL';
+}
+
+export function submitCustomWord(
+    roomId: string,
+    playerId: string,
+    word: unknown
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.phase !== 'WORD_SELECTION') return null;
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player || player.hasSubmittedWord) return null;
+    if (typeof word !== 'string') return null;
+    const normalizedWord = word.trim();
+    if (
+        normalizedWord.length < MIN_CUSTOM_WORD_LENGTH ||
+        normalizedWord.length > MAX_CUSTOM_WORD_LENGTH
+    )
+        return null;
+
+    player.customWord = normalizedWord;
+    player.hasSubmittedWord = true;
+    checkAllCustomWordsSubmitted(room);
     return room;
 }
 
@@ -386,7 +491,8 @@ function resolveLanguage(language: unknown): string {
 
 // The secret word is stored as its canonical English key. The impostor guesses
 // in the language they have selected, so we ONLY accept the translation for that
-// language.
+// language. Player-written words never reach this point: the modes that produce
+// them don't allow guessing at all.
 function isWordMatch(
     guess: string,
     secretWord: string | null,
@@ -411,8 +517,11 @@ export function submitImpostorGuess(
 ): GameRoom | null {
     const room = rooms[roomId];
     if (!room) return null;
-    // Only the impostor may guess, and only when the feature is enabled.
+    // Only the impostor may guess, and only when the feature is enabled in a
+    // mode that supports it (the option is already forced off in those modes,
+    // so this is just an explicit backstop).
     if (room.impostorId !== playerId) return null;
+    if (!supportsImpostorGuess(room.gameMode)) return null;
     if (!room.gameOptions.impostorGuessEnabled) return null;
     if (typeof guess !== 'string') return null;
     const normalizedGuess = guess.trim();
@@ -481,11 +590,14 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
         p.hasRevealedRole = false;
         p.hasConfirmedNewRound = false;
         p.hasStartedEmergencyVoting = false;
+        p.customWord = null;
+        p.hasSubmittedWord = false;
     });
     room.ejectedId = null;
     room.gameEnded = false;
     room.impostorGuessesUsed = 0;
     room.impostorGuessedCorrectly = false;
+    // gameMode is a lobby setting like gameOptions, so it survives Play Again.
     // Clear the lobby-kick blocklist for a fresh game
     delete kickedFromRoom[roomId];
     return room;
@@ -706,7 +818,8 @@ export function updateGameOptions(
     if (room.hostId !== userId) return null;
     const sanitizedOptions = sanitizeGameOptionsUpdate(
         options,
-        room.gameOptions
+        room.gameOptions,
+        room.gameMode
     );
     if (!sanitizedOptions) return null;
     room.gameOptions = sanitizedOptions;
