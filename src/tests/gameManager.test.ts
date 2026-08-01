@@ -19,6 +19,9 @@ import {
     updateGameOptions,
     submitImpostorGuess,
     skipImpostorGuess,
+    setGameMode,
+    submitCustomWord,
+    confirmNewWord,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import {
@@ -53,6 +56,7 @@ describe('gameManager', () => {
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
             });
+            expect(room.gameMode).toBe('CLASSIC');
 
             const fetched = getRoom('room-create');
             expect(fetched).toBe(room);
@@ -337,6 +341,424 @@ describe('gameManager', () => {
             expect(result!.currentTurnPlayerId).not.toBeNull();
             expect(result!.turnOrder).toContain(result!.currentTurnPlayerId);
             expect(result!.gameEnded).toBe(false);
+        });
+
+        it('should enter WORD_SELECTION without a word in CUSTOM_WORD mode', () => {
+            const room = createRoom('room-start-custom', 'host1');
+            ['p1', 'p2', 'p3'].forEach((id) =>
+                joinRoom('room-start-custom', createPlayer(id, id))
+            );
+            setGameMode('room-start-custom', 'host1', 'CUSTOM_WORD');
+
+            const result = startGame('room-start-custom', 'host1');
+            expect(result!.phase).toBe('WORD_SELECTION');
+            expect(result!.secretWord).toBeNull();
+            expect(result!.secretCategory).toBeNull();
+            // Everything else is set up exactly as in a classic game
+            expect(result!.impostorId).not.toBeNull();
+            expect(result!.turnOrder.length).toBe(3);
+            expect(room.players.every((p) => !p.hasSubmittedWord)).toBe(true);
+        });
+    });
+
+    describe('setGameMode', () => {
+        const setupLobby = (id: string) => {
+            const room = createRoom(id, 'host1');
+            joinRoom(id, createPlayer('host1', 'Host'));
+            joinRoom(id, createPlayer('p2', 'Bob'));
+            return room;
+        };
+
+        it('should let the host switch mode from the lobby', () => {
+            setupLobby('mode-ok');
+            const result = setGameMode('mode-ok', 'host1', 'CUSTOM_WORD');
+            expect(result!.gameMode).toBe('CUSTOM_WORD');
+
+            const back = setGameMode('mode-ok', 'host1', 'CLASSIC');
+            expect(back!.gameMode).toBe('CLASSIC');
+        });
+
+        it('should reject non-hosts, unknown modes and missing rooms', () => {
+            const room = setupLobby('mode-invalid');
+
+            expect(setGameMode('mode-invalid', 'p2', 'CUSTOM_WORD')).toBeNull();
+            expect(setGameMode('mode-invalid', 'host1', 'NOPE')).toBeNull();
+            expect(setGameMode('mode-invalid', 'host1', undefined)).toBeNull();
+            expect(setGameMode('missing-room', 'host1', 'CLASSIC')).toBeNull();
+            expect(room.gameMode).toBe('CLASSIC');
+        });
+
+        it('should reject mode changes once the game has started', () => {
+            const room = setupLobby('mode-late');
+            joinRoom('mode-late', createPlayer('p3', 'Charlie'));
+            startGame('mode-late', 'host1');
+
+            expect(setGameMode('mode-late', 'host1', 'CUSTOM_WORD')).toBeNull();
+            expect(room.gameMode).toBe('CLASSIC');
+        });
+
+        it('should turn the impostor guess off when switching to CUSTOM_WORD', () => {
+            const room = setupLobby('mode-guess-off');
+            updateGameOptions('mode-guess-off', 'host1', {
+                impostorGuessEnabled: true,
+            });
+            expect(room.gameOptions.impostorGuessEnabled).toBe(true);
+
+            setGameMode('mode-guess-off', 'host1', 'CUSTOM_WORD');
+            expect(room.gameOptions.impostorGuessEnabled).toBe(false);
+        });
+
+        it('should reject enabling the impostor guess while CUSTOM_WORD is selected', () => {
+            const room = setupLobby('mode-guess-locked');
+            setGameMode('mode-guess-locked', 'host1', 'CUSTOM_WORD');
+
+            const result = updateGameOptions('mode-guess-locked', 'host1', {
+                impostorGuessEnabled: true,
+                roundTime: 40,
+            });
+
+            // The rest of the update still applies, the guess stays off
+            expect(result!.gameOptions.impostorGuessEnabled).toBe(false);
+            expect(result!.gameOptions.roundTime).toBe(40);
+
+            // ...and it becomes settable again back in CLASSIC
+            setGameMode('mode-guess-locked', 'host1', 'CLASSIC');
+            updateGameOptions('mode-guess-locked', 'host1', {
+                impostorGuessEnabled: true,
+            });
+            expect(room.gameOptions.impostorGuessEnabled).toBe(true);
+        });
+
+        it('should survive playAgain', () => {
+            const room = setupLobby('mode-again');
+            joinRoom('mode-again', createPlayer('p3', 'Charlie'));
+            setGameMode('mode-again', 'host1', 'CUSTOM_WORD');
+            startGame('mode-again', 'host1');
+
+            playAgain('mode-again', 'host1');
+            expect(room.gameMode).toBe('CUSTOM_WORD');
+            expect(room.players.every((p) => !p.hasSubmittedWord)).toBe(true);
+            expect(room.players.every((p) => p.customWord === null)).toBe(true);
+        });
+    });
+
+    describe('submitCustomWord', () => {
+        // Room in WORD_SELECTION with a known impostor so the exclusion rule can
+        // be asserted deterministically.
+        const setupWordSelection = (id: string, impostorId = 'p3') => {
+            const room = createRoom(id, 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom(id, createPlayer(pid, pid))
+            );
+            setGameMode(id, 'host1', 'CUSTOM_WORD');
+            startGame(id, 'host1');
+            room.impostorId = impostorId;
+            return room;
+        };
+
+        it('should stay in WORD_SELECTION until everyone has submitted', () => {
+            const room = setupWordSelection('word-partial');
+
+            const afterFirst = submitCustomWord(
+                'word-partial',
+                'host1',
+                'Ship'
+            );
+            expect(afterFirst!.phase).toBe('WORD_SELECTION');
+            expect(
+                room.players.find((p) => p.id === 'host1')!.hasSubmittedWord
+            ).toBe(true);
+
+            submitCustomWord('word-partial', 'p2', 'Castle');
+            expect(room.phase).toBe('WORD_SELECTION');
+
+            submitCustomWord('word-partial', 'p3', 'Rocket');
+            expect(room.phase).toBe('ROLE_REVEAL');
+        });
+
+        it('should pick a submitted word and the Special category', () => {
+            const room = setupWordSelection('word-pick');
+            submitCustomWord('word-pick', 'host1', 'Ship');
+            submitCustomWord('word-pick', 'p2', 'Castle');
+            submitCustomWord('word-pick', 'p3', 'Rocket');
+
+            expect(room.secretCategory).toBe('Special');
+            expect(['Ship', 'Castle']).toContain(room.secretWord);
+        });
+
+        it('should never pick the impostor word', () => {
+            // Run enough times that a random pick would hit the impostor's word.
+            for (let i = 0; i < 30; i++) {
+                const room = setupWordSelection(`word-exclude-${i}`);
+                submitCustomWord(`word-exclude-${i}`, 'host1', 'Ship');
+                submitCustomWord(`word-exclude-${i}`, 'p2', 'Castle');
+                submitCustomWord(`word-exclude-${i}`, 'p3', 'ImpostorWord');
+                expect(room.secretWord).not.toBe('ImpostorWord');
+            }
+        });
+
+        it('should fall back to the built-in list when only the impostor submitted', () => {
+            const room = setupWordSelection('word-fallback');
+            // The other two drop out, leaving only the impostor's word.
+            leaveRoom('word-fallback', 'host1');
+            leaveRoom('word-fallback', 'p2');
+            expect(room.phase).toBe('WORD_SELECTION');
+
+            submitCustomWord('word-fallback', 'p3', 'ImpostorWord');
+            expect(room.phase).toBe('ROLE_REVEAL');
+            expect(room.secretWord).not.toBe('ImpostorWord');
+            expect(room.secretWord).not.toBeNull();
+            expect(room.secretCategory).not.toBe('Special');
+        });
+
+        it('should trim words and reject invalid ones', () => {
+            const room = setupWordSelection('word-validate');
+
+            expect(submitCustomWord('word-validate', 'host1', '  ')).toBeNull();
+            expect(submitCustomWord('word-validate', 'host1', 'a')).toBeNull();
+            expect(
+                submitCustomWord('word-validate', 'host1', 'x'.repeat(41))
+            ).toBeNull();
+            expect(submitCustomWord('word-validate', 'host1', 42)).toBeNull();
+            expect(
+                room.players.find((p) => p.id === 'host1')!.hasSubmittedWord
+            ).toBeFalsy();
+
+            submitCustomWord('word-validate', 'host1', '  Ship  ');
+            expect(room.players.find((p) => p.id === 'host1')!.customWord).toBe(
+                'Ship'
+            );
+        });
+
+        it('should reject unknown players, resubmissions and wrong phases', () => {
+            const room = setupWordSelection('word-guards');
+
+            expect(submitCustomWord('word-guards', 'ghost', 'Ship')).toBeNull();
+            submitCustomWord('word-guards', 'host1', 'Ship');
+            // Second attempt from the same player is ignored, word unchanged
+            expect(
+                submitCustomWord('word-guards', 'host1', 'Other')
+            ).toBeNull();
+            expect(room.players.find((p) => p.id === 'host1')!.customWord).toBe(
+                'Ship'
+            );
+
+            room.phase = 'DRAWING';
+            expect(submitCustomWord('word-guards', 'p2', 'Ship')).toBeNull();
+            expect(submitCustomWord('missing-room', 'p2', 'Ship')).toBeNull();
+        });
+
+        it('should never advance the phase when a player disconnects', () => {
+            const room = setupWordSelection('word-disconnect');
+            submitCustomWord('word-disconnect', 'host1', 'Ship');
+            submitCustomWord('word-disconnect', 'p3', 'ImpostorWord');
+            expect(room.phase).toBe('WORD_SELECTION');
+
+            // The only player left to answer drops: the phase must hold so the
+            // others are not rushed out of the form.
+            leaveRoom('word-disconnect', 'p2');
+            expect(room.phase).toBe('WORD_SELECTION');
+            expect(room.secretWord).toBeNull();
+        });
+
+        it('should ignore disconnected players on the next submission', () => {
+            const room = setupWordSelection('word-disconnect-resolve');
+            leaveRoom('word-disconnect-resolve', 'p2');
+            expect(room.phase).toBe('WORD_SELECTION');
+
+            submitCustomWord('word-disconnect-resolve', 'host1', 'Ship');
+            expect(room.phase).toBe('WORD_SELECTION');
+
+            // The last connected player submits -> the player who left is not
+            // waited for, so the phase resolves normally.
+            submitCustomWord('word-disconnect-resolve', 'p3', 'ImpostorWord');
+            expect(room.phase).toBe('ROLE_REVEAL');
+            expect(room.secretWord).toBe('Ship');
+        });
+    });
+
+    describe('HOT_WORD mode', () => {
+        // Room mid-game, sitting in RESULTS and ready to confirm a new round.
+        const setupResultsRoom = (id: string) => {
+            const room = createRoom(id, 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom(id, createPlayer(pid, pid))
+            );
+            setGameMode(id, 'host1', 'HOT_WORD');
+            startGame(id, 'host1');
+            room.impostorId = 'host1';
+            room.phase = 'RESULTS';
+            return room;
+        };
+
+        const confirmNextRound = (id: string, playerIds: string[]) =>
+            playerIds.forEach((playerId) => nextRound(id, playerId));
+
+        it('should start the game exactly like CLASSIC', () => {
+            const room = createRoom('hot-start', 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom('hot-start', createPlayer(pid, pid))
+            );
+            setGameMode('hot-start', 'host1', 'HOT_WORD');
+
+            const result = startGame('hot-start', 'host1');
+            expect(result!.phase).toBe('ROLE_REVEAL');
+            expect(result!.secretWord).not.toBeNull();
+            expect(room.usedWords).toEqual([room.secretWord]);
+        });
+
+        it('should start each new round on WORD_REVEAL with a new word', () => {
+            const room = setupResultsRoom('hot-new-round');
+            const firstWord = room.secretWord;
+
+            confirmNextRound('hot-new-round', ['host1', 'p2']);
+            expect(room.phase).toBe('RESULTS');
+
+            const result = nextRound('hot-new-round', 'p3');
+
+            expect(result!.phase).toBe('WORD_REVEAL');
+            expect(result!.currentRound).toBe(2);
+            expect(result!.secretWord).not.toBe(firstWord);
+            expect(result!.secretCategory).not.toBeNull();
+            // Same impostor, and nobody has seen the new word yet
+            expect(result!.impostorId).toBe('host1');
+            expect(room.players.every((p) => !p.hasRevealedNewWord)).toBe(true);
+        });
+
+        it('should keep CLASSIC going straight to DRAWING', () => {
+            const room = createRoom('classic-new-round', 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom('classic-new-round', createPlayer(pid, pid))
+            );
+            startGame('classic-new-round', 'host1');
+            const word = room.secretWord;
+            room.phase = 'RESULTS';
+
+            confirmNextRound('classic-new-round', ['host1', 'p2', 'p3']);
+
+            expect(room.phase).toBe('DRAWING');
+            expect(room.secretWord).toBe(word);
+        });
+
+        it('should move to DRAWING once everyone confirms the new word', () => {
+            const room = setupResultsRoom('hot-confirm');
+            confirmNextRound('hot-confirm', ['host1', 'p2', 'p3']);
+            expect(room.phase).toBe('WORD_REVEAL');
+
+            confirmNewWord('hot-confirm', 'host1');
+            expect(
+                room.players.find((p) => p.id === 'host1')!.hasRevealedNewWord
+            ).toBe(true);
+            expect(room.phase).toBe('WORD_REVEAL');
+
+            confirmNewWord('hot-confirm', 'p2');
+            expect(room.phase).toBe('WORD_REVEAL');
+
+            const result = confirmNewWord('hot-confirm', 'p3');
+            expect(result!.phase).toBe('DRAWING');
+        });
+
+        it('should not wait for ejected players', () => {
+            const room = setupResultsRoom('hot-ejected');
+            room.players.find((p) => p.id === 'p3')!.isEjected = true;
+
+            // The ejected player cannot confirm the round either
+            confirmNextRound('hot-ejected', ['host1', 'p2']);
+            expect(room.phase).toBe('WORD_REVEAL');
+
+            confirmNewWord('hot-ejected', 'host1');
+            const result = confirmNewWord('hot-ejected', 'p2');
+            expect(result!.phase).toBe('DRAWING');
+        });
+
+        it('should still wait for a disconnected player', () => {
+            const room = setupResultsRoom('hot-disconnected');
+            confirmNextRound('hot-disconnected', ['host1', 'p2', 'p3']);
+            expect(room.phase).toBe('WORD_REVEAL');
+
+            room.players.find((p) => p.id === 'p3')!.isConnected = false;
+            confirmNewWord('hot-disconnected', 'host1');
+            confirmNewWord('hot-disconnected', 'p2');
+
+            // Deliberate: nobody starts drawing until everyone still in the game
+            // has seen the word, even if that means waiting for a reconnection.
+            expect(room.phase).toBe('WORD_REVEAL');
+        });
+
+        it('should reject confirmations from the wrong phase, room or player', () => {
+            expect(confirmNewWord('missing-room', 'host1')).toBeNull();
+
+            const room = setupResultsRoom('hot-guards');
+            expect(confirmNewWord('hot-guards', 'host1')).toBeNull();
+
+            confirmNextRound('hot-guards', ['host1', 'p2', 'p3']);
+            expect(confirmNewWord('hot-guards', 'ghost')).toBeNull();
+            expect(room.phase).toBe('WORD_REVEAL');
+        });
+
+        it('should not repeat a word within the same game', () => {
+            const room = setupResultsRoom('hot-no-repeat');
+            const seen = [room.secretWord];
+
+            for (let round = 0; round < 15; round++) {
+                room.phase = 'RESULTS';
+                room.players.forEach((p) => {
+                    p.hasConfirmedNewRound = false;
+                });
+                confirmNextRound('hot-no-repeat', ['host1', 'p2', 'p3']);
+
+                expect(seen).not.toContain(room.secretWord);
+                seen.push(room.secretWord);
+            }
+
+            expect(room.usedWords).toEqual(seen);
+        });
+
+        it('should forget the used words on playAgain', () => {
+            const room = setupResultsRoom('hot-play-again');
+            expect(room.usedWords.length).toBe(1);
+
+            playAgain('hot-play-again', 'host1');
+            expect(room.usedWords).toEqual([]);
+            expect(room.players.every((p) => !p.hasRevealedNewWord)).toBe(true);
+        });
+
+        it('should force the canvas to be cleared every round and lock the option', () => {
+            const room = createRoom('hot-options', 'host1');
+            joinRoom('hot-options', createPlayer('host1', 'Host'));
+            updateGameOptions('hot-options', 'host1', {
+                clearCanvasEachRound: false,
+            });
+            expect(room.gameOptions.clearCanvasEachRound).toBe(false);
+
+            setGameMode('hot-options', 'host1', 'HOT_WORD');
+            expect(room.gameOptions.clearCanvasEachRound).toBe(true);
+
+            const result = updateGameOptions('hot-options', 'host1', {
+                clearCanvasEachRound: false,
+                roundTime: 40,
+            });
+            // The rest of the update still applies
+            expect(result!.gameOptions.clearCanvasEachRound).toBe(true);
+            expect(result!.gameOptions.roundTime).toBe(40);
+
+            // ...and it becomes settable again back in CLASSIC
+            setGameMode('hot-options', 'host1', 'CLASSIC');
+            updateGameOptions('hot-options', 'host1', {
+                clearCanvasEachRound: false,
+            });
+            expect(room.gameOptions.clearCanvasEachRound).toBe(false);
+        });
+
+        it('should allow the impostor guess, unlike CUSTOM_WORD', () => {
+            const room = createRoom('hot-guess', 'host1');
+            joinRoom('hot-guess', createPlayer('host1', 'Host'));
+            setGameMode('hot-guess', 'host1', 'HOT_WORD');
+
+            updateGameOptions('hot-guess', 'host1', {
+                impostorGuessEnabled: true,
+            });
+            expect(room.gameOptions.impostorGuessEnabled).toBe(true);
         });
     });
 
@@ -1485,6 +1907,26 @@ describe('gameManager', () => {
                 'es'
             );
             expect(result!.impostorGuessedCorrectly).toBe(true);
+        });
+
+        it('should refuse to guess at all in CUSTOM_WORD mode', () => {
+            // The option is already forced off for this mode; this covers the
+            // backstop in case the flag were ever set some other way.
+            const room = setupGuessRoom('guess-custom-mode', 'Lighthouse');
+            room.gameMode = 'CUSTOM_WORD';
+            room.secretCategory = 'Special';
+
+            const result = submitImpostorGuess(
+                'guess-custom-mode',
+                'imp',
+                'Lighthouse',
+                'en'
+            );
+
+            expect(result).toBeNull();
+            expect(room.impostorGuessedCorrectly).toBe(false);
+            expect(room.impostorGuessesUsed).toBe(0);
+            expect(room.phase).toBe('DRAWING');
         });
 
         it('should reject a wrong guess and consume an attempt without ending the game', () => {

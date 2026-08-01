@@ -682,6 +682,339 @@ describe('Server API and Socket Integration Tests', () => {
         }, 15_000);
     });
 
+    describe('Socket Game Mode & Custom Word Flow', () => {
+        interface RoleAssignment {
+            isImpostor: boolean;
+            secretWord: string | null;
+            secretCategory: string | null;
+        }
+
+        it('should apply the host game mode immediately and ignore non-hosts', async () => {
+            const roomId = 'game-mode-socket-room';
+            const hostToken = await getToken(
+                'ModeHost',
+                '00000000-0000-4000-8000-000000000030'
+            );
+            const playerToken = await getToken(
+                'ModePlayer',
+                '00000000-0000-4000-8000-000000000031'
+            );
+
+            const hostSocket = await connectSocket(hostToken);
+            const playerSocket = await connectSocket(playerToken);
+
+            const roomCreated = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            const playerJoined = waitForEvent<GameRoom>(
+                playerSocket,
+                'gameStateUpdate'
+            );
+            const hostSawJoin = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            playerSocket.emit('joinRoom', { roomId });
+            await Promise.all([playerJoined, hostSawJoin]);
+
+            const nextHostState = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            const nextPlayerState = waitForEvent<GameRoom>(
+                playerSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+
+            const [hostState, playerState] = await Promise.all([
+                nextHostState,
+                nextPlayerState,
+            ]);
+            expect(hostState.gameMode).toBe('CUSTOM_WORD');
+            expect(playerState.gameMode).toBe('CUSTOM_WORD');
+
+            // A non-host trying to change the mode is ignored
+            playerSocket.emit('setGameMode', { gameMode: 'CLASSIC' });
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            expect(getRoom(roomId)?.gameMode).toBe('CUSTOM_WORD');
+
+            hostSocket.disconnect();
+            playerSocket.disconnect();
+        }, 15_000);
+
+        it('should run the WORD_SELECTION phase without leaking the submitted words', async () => {
+            const roomId = 'custom-word-socket-room';
+            const userIds = [
+                '00000000-0000-4000-8000-000000000032',
+                '00000000-0000-4000-8000-000000000033',
+                '00000000-0000-4000-8000-000000000034',
+            ];
+            const words = ['Lighthouse', 'Volcano', 'Submarine'];
+            const sockets = await Promise.all(
+                userIds.map(async (userId, index) =>
+                    connectSocket(await getToken(`WordP${index}`, userId))
+                )
+            );
+            const [hostSocket] = sockets;
+
+            const roomCreated = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            for (const s of sockets.slice(1)) {
+                const joined = waitForEvent<GameRoom>(s, 'gameStateUpdate');
+                s.emit('joinRoom', { roomId });
+                await joined;
+            }
+
+            hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            // Roles must NOT be handed out before the word exists
+            let earlyRoles = 0;
+            sockets.forEach((s) => s.on('roleAssignment', () => earlyRoles++));
+
+            const started = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('startGame');
+            const startedState = await started;
+            expect(startedState.phase).toBe('WORD_SELECTION');
+            expect(startedState.secretWord).toBeNull();
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            expect(earlyRoles).toBe(0);
+
+            const impostorId = getRoom(roomId)!.impostorId;
+            const impostorIndex = userIds.indexOf(impostorId!);
+            const impostorWord = words[impostorIndex];
+
+            // Everyone submits; the last submission resolves the phase
+            const roles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            for (let i = 0; i < sockets.length - 1; i++) {
+                sockets[i].emit('submitCustomWord', { word: words[i] });
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('WORD_SELECTION');
+
+            const finalStates = sockets.map((s) =>
+                waitForEvent<GameRoom>(s, 'gameStateUpdate')
+            );
+            const last = sockets.length - 1;
+            sockets[last].emit('submitCustomWord', { word: words[last] });
+
+            const assignments = await Promise.all(roles);
+            const states = await Promise.all(finalStates);
+
+            const room = getRoom(roomId)!;
+            expect(room.phase).toBe('ROLE_REVEAL');
+            expect(room.secretWord).not.toBe(impostorWord);
+            expect(words).toContain(room.secretWord);
+
+            assignments.forEach((assignment, index) => {
+                expect(assignment.secretCategory).toBe('Special');
+                if (userIds[index] === impostorId) {
+                    expect(assignment.isImpostor).toBe(true);
+                    expect(assignment.secretWord).toBeNull();
+                } else {
+                    expect(assignment.isImpostor).toBe(false);
+                    expect(assignment.secretWord).toBe(room.secretWord);
+                }
+            });
+
+            // The broadcast state exposes the submission flag but never the words
+            states.forEach((state) => {
+                expect(state.phase).toBe('ROLE_REVEAL');
+                state.players.forEach((player: Player) => {
+                    expect(player.hasSubmittedWord).toBe(true);
+                    expect('customWord' in player).toBe(false);
+                });
+            });
+
+            sockets.forEach((s) => s.disconnect());
+        }, 20_000);
+    });
+
+    it('should not hand out roles while the players are still writing their word', async () => {
+        const roomId = 'word-selection-reconnect-room';
+        const userIds = [
+            '00000000-0000-4000-8000-000000000050',
+            '00000000-0000-4000-8000-000000000051',
+            '00000000-0000-4000-8000-000000000052',
+        ];
+        const tokens = await Promise.all(
+            userIds.map((userId, index) => getToken(`RejoinP${index}`, userId))
+        );
+        const sockets = await Promise.all(tokens.map(connectSocket));
+        const [hostSocket] = sockets;
+
+        const roomCreated = waitForEvent<GameRoom>(
+            hostSocket,
+            'gameStateUpdate'
+        );
+        hostSocket.emit('createRoom', { roomId });
+        await roomCreated;
+
+        for (const s of sockets.slice(1)) {
+            const joined = waitForEvent<GameRoom>(s, 'gameStateUpdate');
+            s.emit('joinRoom', { roomId });
+            await joined;
+        }
+
+        hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        hostSocket.emit('startGame');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(getRoom(roomId)!.phase).toBe('WORD_SELECTION');
+
+        // A player reloads the page mid-writing: the replacement connection
+        // drops the previous socket, so let that settle before rejoining.
+        const reconnected = await connectSocket(tokens[1]);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        let roleAssignments = 0;
+        reconnected.on('roleAssignment', () => roleAssignments++);
+
+        const rejoined = waitForEvent<GameRoom>(reconnected, 'gameStateUpdate');
+        reconnected.emit('joinRoom', { roomId });
+        expect((await rejoined).phase).toBe('WORD_SELECTION');
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // Their role exists on the server already, but the game has revealed
+        // nothing yet — so nothing about it may reach the client.
+        expect(roleAssignments).toBe(0);
+
+        // Same for a language change, which goes through the same branch
+        reconnected.emit('setLanguage', { language: 'es' });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(roleAssignments).toBe(0);
+
+        // Once the phase resolves, they do get their role like everyone else
+        const activeSockets = [sockets[0], reconnected, sockets[2]];
+        for (const s of activeSockets) {
+            s.emit('submitCustomWord', { word: 'Lighthouse' });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(getRoom(roomId)!.phase).toBe('ROLE_REVEAL');
+        expect(roleAssignments).toBe(1);
+
+        activeSockets.forEach((s) => s.disconnect());
+    }, 20_000);
+
+    describe('Socket Hot Word Flow', () => {
+        interface RoleAssignment {
+            isImpostor: boolean;
+            secretWord: string | null;
+            secretCategory: string | null;
+        }
+
+        it('should reveal a new word every round, before announcing the phase', async () => {
+            const roomId = 'hot-word-socket-room';
+            const userIds = [
+                '00000000-0000-4000-8000-000000000040',
+                '00000000-0000-4000-8000-000000000041',
+                '00000000-0000-4000-8000-000000000042',
+            ];
+            const sockets = await Promise.all(
+                userIds.map(async (userId, index) =>
+                    connectSocket(await getToken(`HotP${index}`, userId))
+                )
+            );
+            const [hostSocket] = sockets;
+
+            const roomCreated = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            for (const s of sockets.slice(1)) {
+                const joined = waitForEvent<GameRoom>(s, 'gameStateUpdate');
+                s.emit('joinRoom', { roomId });
+                await joined;
+            }
+
+            hostSocket.emit('setGameMode', { gameMode: 'HOT_WORD' });
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            const firstRoles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            hostSocket.emit('startGame');
+            await Promise.all(firstRoles);
+            const firstWord = getRoom(roomId)!.secretWord;
+            const impostorId = getRoom(roomId)!.impostorId;
+
+            // Skip the round itself and jump straight to the results screen
+            getRoom(roomId)!.phase = 'RESULTS';
+
+            for (const s of sockets.slice(0, -1)) {
+                s.emit('nextRound');
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('RESULTS');
+
+            // Record the order in which the last player sees both events
+            const sequence: string[] = [];
+            const last = sockets[sockets.length - 1];
+            last.on('roleAssignment', () => sequence.push('roleAssignment'));
+            last.on('gameStateUpdate', (state: GameRoom) =>
+                sequence.push(`gameStateUpdate:${state.phase}`)
+            );
+
+            const newRoles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            last.emit('nextRound');
+            const assignments = await Promise.all(newRoles);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            const room = getRoom(roomId)!;
+            expect(room.phase).toBe('WORD_REVEAL');
+            expect(room.currentRound).toBe(2);
+            expect(room.secretWord).not.toBe(firstWord);
+            expect(room.impostorId).toBe(impostorId);
+
+            // The word must land before the phase that shows it on screen,
+            // otherwise the reveal renders the previous round's word.
+            expect(sequence).toEqual([
+                'roleAssignment',
+                'gameStateUpdate:WORD_REVEAL',
+            ]);
+
+            assignments.forEach((assignment, index) => {
+                expect(assignment.secretCategory).not.toBeNull();
+                if (userIds[index] === impostorId) {
+                    expect(assignment.secretWord).toBeNull();
+                } else {
+                    expect(assignment.secretWord).toBe(room.secretWord);
+                }
+            });
+
+            // Everyone confirms the new word and the round starts
+            for (const s of sockets) {
+                s.emit('confirmNewWord');
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('DRAWING');
+
+            sockets.forEach((s) => s.disconnect());
+        }, 20_000);
+    });
+
     describe('Socket Kick Player Flow', () => {
         const getToken = async (username: string, userId: string) => {
             const res = await request(app)
