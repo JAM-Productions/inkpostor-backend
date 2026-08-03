@@ -53,6 +53,7 @@ export interface GameOptions {
     roundTime: number;
     unlimitedInk: boolean;
     clearCanvasEachRound: boolean;
+    playerColorsEnabled: boolean;
     impostorGuessEnabled: boolean;
     impostorGuessAttempts: number;
 }

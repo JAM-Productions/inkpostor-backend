@@ -53,6 +53,7 @@ describe('gameManager', () => {
                 roundTime: DEFAULT_ROUND_TIME,
                 unlimitedInk: false,
                 clearCanvasEachRound: true,
+                playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
             });
@@ -1686,6 +1687,7 @@ describe('gameManager', () => {
                 roundTime: 40,
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
+                playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
             });
@@ -1711,6 +1713,7 @@ describe('gameManager', () => {
                 roundTime: 35,
                 unlimitedInk: true,
                 clearCanvasEachRound: true,
+                playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
             });
@@ -1731,10 +1734,31 @@ describe('gameManager', () => {
                 roundTime: DEFAULT_ROUND_TIME,
                 unlimitedInk: true,
                 clearCanvasEachRound: true,
+                playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
             });
             expect('unexpected' in result!.gameOptions).toBe(false);
+        });
+
+        it('should toggle playerColorsEnabled, which defaults to off', () => {
+            const room = createRoom('room-options-player-colors', 'host1');
+            expect(room.gameOptions.playerColorsEnabled).toBe(false);
+
+            updateGameOptions('room-options-player-colors', 'host1', {
+                playerColorsEnabled: true,
+            });
+            expect(room.gameOptions.playerColorsEnabled).toBe(true);
+
+            updateGameOptions('room-options-player-colors', 'host1', {
+                playerColorsEnabled: 'nope',
+            });
+            expect(room.gameOptions.playerColorsEnabled).toBe(true);
+
+            updateGameOptions('room-options-player-colors', 'host1', {
+                playerColorsEnabled: false,
+            });
+            expect(room.gameOptions.playerColorsEnabled).toBe(false);
         });
 
         it('should only accept configured roundTime values', () => {

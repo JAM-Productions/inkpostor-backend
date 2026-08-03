@@ -594,6 +594,7 @@ describe('Server API and Socket Integration Tests', () => {
                 roundTime: 40,
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
+                playerColorsEnabled: true,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
             };
@@ -668,6 +669,7 @@ describe('Server API and Socket Integration Tests', () => {
                 roundTime: 20,
                 unlimitedInk: true,
                 clearCanvasEachRound: true,
+                playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
             });
