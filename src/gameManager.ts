@@ -60,6 +60,9 @@ function sanitizeGameOptionsUpdate(
     if (typeof options.clearCanvasEachRound === 'boolean') {
         nextOptions.clearCanvasEachRound = options.clearCanvasEachRound;
     }
+    if (typeof options.playerColorsEnabled === 'boolean') {
+        nextOptions.playerColorsEnabled = options.playerColorsEnabled;
+    }
     if (typeof options.impostorGuessEnabled === 'boolean') {
         nextOptions.impostorGuessEnabled = options.impostorGuessEnabled;
     }
@@ -100,6 +103,7 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
             roundTime: DEFAULT_ROUND_TIME,
             unlimitedInk: false,
             clearCanvasEachRound: true,
+            playerColorsEnabled: false,
             impostorGuessEnabled: false,
             impostorGuessAttempts: DEFAULT_IMPOSTOR_GUESSES,
         },
