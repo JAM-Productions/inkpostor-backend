@@ -93,3 +93,6 @@ docker run -p 3001:3001 --env-file .env inkpostor-backend
 
 ### Socket Events
 - [Socket Events](docs/game_states.md#socket-events)
+
+### Testing Strategy & Cross-Repo CI
+- [Testing Strategy & Cross-Repo CI](https://github.com/jordi/inkpostor-frontend/blob/main/docs/TESTING.md)
