@@ -3,4 +3,6 @@ node_modules/
 .DS_Store
 dist/
 coverage/
+test-results/
+playwright-report/
 pnpm-debug.log*
