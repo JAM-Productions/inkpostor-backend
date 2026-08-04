@@ -30,9 +30,11 @@ import {
     setGameMode,
     submitCustomWord,
     confirmNewWord,
+    confirmOrder,
 } from './gameManager';
 import { GameRoom, Player, StrokeData, UserPayload } from './types';
 import wordTranslations from './wordTranslations.json';
+import { isPlayerWordMode } from './constants';
 
 dotenv.config();
 
@@ -302,6 +304,16 @@ io.on('connection', (socket: Socket) => {
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = confirmNewWord(roomId, user.userId);
+        if (room) {
+            broadcastGameState(roomId);
+        }
+    });
+
+    socket.on('confirmOrder', () => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = confirmOrder(roomId, user.userId);
         if (room) {
             broadcastGameState(roomId);
         }
@@ -595,8 +607,19 @@ function translateWord(word: string | null, language: string): string | null {
 // key, and translating a word that happens to collide with one (e.g. "Dog")
 // would show a different word than the one the server matches guesses against.
 function translateSecretWord(room: GameRoom, language: string): string | null {
-    if (room.gameMode === 'CUSTOM_WORD') return room.secretWord;
+    if (isPlayerWordMode(room.gameMode)) return room.secretWord;
     return translateWord(room.secretWord, language);
+}
+
+// The category is the impostor's only foothold, so ORIGINAL lets the host take
+// it away (`hideHint`). It has to be withheld here rather than hidden by the
+// client: the payload itself must never carry it.
+function hidesCategoryFrom(room: GameRoom, playerId: string): boolean {
+    return (
+        room.gameOptions.hideHint &&
+        playerId === room.impostorId &&
+        room.phase !== 'RESULTS' // Everything is revealed once the game is over
+    );
 }
 
 function buildRoleAssignment(room: GameRoom, player: Player) {
@@ -605,7 +628,9 @@ function buildRoleAssignment(room: GameRoom, player: Player) {
     return {
         isImpostor,
         secretWord: isImpostor ? null : translateSecretWord(room, language),
-        secretCategory: translateWord(room.secretCategory, language),
+        secretCategory: hidesCategoryFrom(room, player.id)
+            ? null
+            : translateWord(room.secretCategory, language),
     };
 }
 
@@ -666,9 +691,15 @@ function emitGameStateToPlayer(roomId: string, playerId: string) {
     if (!socketId) return;
     const player = room.players.find((p) => p.id === playerId);
     const language = player?.language || 'en';
+    const state = getTranslatedRoomState(room, language);
+    // Unlike the secret word, the category is not hidden from the broadcast: it
+    // is public in every other mode. So `hideHint` has to strip it here too, or
+    // the impostor would simply read it off the state update.
     io.to(socketId).emit(
         'gameStateUpdate',
-        getTranslatedRoomState(room, language)
+        state && hidesCategoryFrom(room, playerId)
+            ? { ...state, secretCategory: null }
+            : state
     );
 }
 

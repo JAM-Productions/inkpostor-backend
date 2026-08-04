@@ -12,6 +12,17 @@ field on the room. It survives `playAgain`.
 | `CLASSIC` | Default. The secret word is drawn at random from the built-in word list. |
 | `CUSTOM_WORD` | Every player writes a word in `WORD_SELECTION`; one of them becomes the secret word, under the `Special` category. |
 | `HOT_WORD` | Words come from the built-in list as in `CLASSIC`, but a **new one is drawn every round**. The impostor stays the same, so each round starts on `WORD_REVEAL` instead of going straight to `DRAWING`. |
+| `ORIGINAL` | The in-person party game: players say words out loud instead of drawing. **There is no `DRAWING` phase at all** — every round runs `ORDER_INFO → VOTING`. |
+| `ORIGINAL_CHAOS` | `ORIGINAL` played with a word the players write themselves: it opens on `WORD_SELECTION` like `CUSTOM_WORD`, then runs exactly like `ORIGINAL`. |
+
+Modes are combinations of a few traits rather than one-offs, so the rules key off
+two predicates in `constants.ts` instead of naming modes one by one — adding a
+mode means listing it there, not hunting down every comparison:
+
+| Predicate | Modes | What it decides |
+|---|---|---|
+| `isSpokenMode` | `ORIGINAL`, `ORIGINAL_CHAOS` | The round opens on `ORDER_INFO` instead of `DRAWING`, and `RANDOM_ORDER` redraws the order each round |
+| `isPlayerWordMode` | `CUSTOM_WORD`, `ORIGINAL_CHAOS` | The game opens on `WORD_SELECTION`, and the word is sent verbatim instead of through the translation table |
 
 Some modes take an option over. While such a mode is selected the value is
 forced and the host cannot change it — `setGameMode` applies it and
@@ -23,18 +34,23 @@ mirrored by the options modal in the client:
 |---|---|---|
 | `CUSTOM_WORD` | `impostorGuessEnabled: false` | The word is written by a player, so it could simply be handed to the impostor. |
 | `HOT_WORD` | `clearCanvasEachRound: true` | Every round has a new word, so keeping the previous drawing makes no sense. |
+| `ORIGINAL`, `ORIGINAL_CHAOS` | every drawing option, back to its default | Nothing is drawn, so `roundTime`, `unlimitedInk`, `playerColorsEnabled`, `clearCanvasEachRound`, `impostorGuessEnabled` and `impostorGuessAttempts` are all reset instead of lingering as settings the host cannot see. |
+| every non-spoken mode | `hideHint: false` | `hideHint` is a spoken-mode-only option. Left on, it would keep the category from the impostor in a mode whose options screen cannot even turn it back off. |
 
 Switching back to a mode without the lock leaves the forced value in place; the
-host can then change it again.
+host can then change it again. A spoken mode locks the drawing options *away* rather
+than showing them with a padlock: the client hides those sections entirely and
+renders the mode's own two instead (`hideHint`, `turnOrderMode`).
 
 ## Game Phases
 
 | Phase | Description |
 |---|---|
 | `LOBBY` | Players join the room. Host can kick players. Game hasn't started. |
-| `WORD_SELECTION` | `CUSTOM_WORD` mode only. Every player writes and confirms a word. Reached instead of `ROLE_REVEAL` when the game starts. |
+| `WORD_SELECTION` | Player-word modes only. Every player writes and confirms a word. Reached instead of `ROLE_REVEAL` when the game starts. |
 | `ROLE_REVEAL` | Players see their role (Inkpostor or Crewmate). Must confirm before proceeding. |
 | `WORD_REVEAL` | `HOT_WORD` mode only. Players see the new word of the round (the impostor, only its category) and confirm. Roles are not shown again — they haven't changed. |
+| `ORDER_INFO` | Spoken modes only. Announces who opens the round and in which direction, then every player confirms. Replaces `DRAWING` as the start of the round. |
 | `DRAWING` | Players take turns drawing on the canvas. Vote-kick is available. |
 | `VOTING` | All players vote on who they think the Inkpostor is (or skip). |
 | `IMPOSTOR_GUESS` | The ejected Inkpostor gets one final guess at the secret word. Everyone else waits. Only reached when the impostor-guess option is enabled. |
@@ -46,9 +62,11 @@ host can then change it again.
 
 ```
 LOBBY → ROLE_REVEAL          (host starts the game in CLASSIC mode, ≥ 3 players required)
-LOBBY → WORD_SELECTION       (host starts the game in CUSTOM_WORD mode, ≥ 3 players required)
+LOBBY → WORD_SELECTION       (host starts the game in a player-word mode, ≥ 3 players required)
 WORD_SELECTION → ROLE_REVEAL (all connected players submit their word)
 ROLE_REVEAL → DRAWING        (all players confirm their role)
+ROLE_REVEAL → ORDER_INFO     (same, in a spoken mode — nothing is drawn)
+ORDER_INFO → VOTING          (all non-ejected players confirm they have read the order)
 DRAWING → VOTING             (all turns used up, or emergency voting triggered)
 DRAWING → RESULTS            (vote-kick causes game-ending condition)
 DRAWING → RESULTS            (impostor guesses the word correctly — impostor wins)
@@ -58,16 +76,17 @@ VOTING → IMPOSTOR_GUESS      (impostor ejected by vote AND the impostor-guess 
 IMPOSTOR_GUESS → RESULTS     (impostor submits their final guess, or skips it)
 RESULTS → DRAWING            (next round, all connected non-ejected players confirm)
 RESULTS → WORD_REVEAL        (same, in HOT_WORD mode — a new word is drawn)
+RESULTS → ORDER_INFO         (same, in a spoken mode — same word, same order)
 WORD_REVEAL → DRAWING        (all non-ejected players confirm the new word)
 RESULTS → LOBBY              (host clicks Play Again)
 ```
 
-> `ROLE_REVEAL` and `WORD_REVEAL` wait for **every** non-ejected player, including
-> disconnected ones: nobody starts drawing until everyone still in the game has
-> seen the word, even if that means waiting for a reconnection (the host can
-> always end the game). Ejected players may watch the reveal — they are never
-> the impostor, since ejecting the impostor ends the game — but are not waited
-> for.
+> `ROLE_REVEAL`, `WORD_REVEAL` and `ORDER_INFO` wait for **every** non-ejected
+> player, including disconnected ones: no round starts until everyone still in
+> the game has seen the screen, even if that means waiting for a reconnection
+> (the host can always end the game). Ejected players may watch the reveal —
+> they are never the impostor, since ejecting the impostor ends the game — but
+> are not waited for.
 
 ### Disconnect-driven transitions
 
@@ -81,7 +100,13 @@ game never hangs waiting on someone who left:
 VOTING → RESULTS / IMPOSTOR_GUESS   (last expected voter disconnects → the vote resolves)
 IMPOSTOR_GUESS → RESULTS            (the impostor disconnects → counts as a surrender, crewmates win)
 RESULTS → DRAWING                   (last unconfirmed player disconnects → next round starts)
+RESULTS → ORDER_INFO                (same, in a spoken mode)
 ```
+
+> A disconnect in `RESULTS` therefore pushes everyone onto the round-start screen
+> (`ORDER_INFO` / `WORD_REVEAL`), which then **does** wait for that same
+> disconnected player. That is deliberate: the round is not played out behind
+> their back, and the host can always end the game.
 
 > `WORD_SELECTION` is the exception: a disconnect there is **never** acted upon,
 > so a dropping player can't rush everyone else out of the word form. The phase
@@ -191,6 +216,51 @@ Lets the lobby play with a word written by the players themselves.
 
 ---
 
+## Original Modes (`ORIGINAL`, `ORIGINAL_CHAOS`)
+
+The in-person party game: nobody draws, players say one word out loud in turn and
+then vote. Recommended to play face to face — the phones only hand out the roles
+and keep the score.
+
+- In `ORIGINAL`, `startGame` behaves exactly like `CLASSIC` (random word, random
+  `turnOrder`, `ROLE_REVEAL`). Only the phase that follows the reveal changes.
+- `ORIGINAL_CHAOS` is the same mode played with a word the players write
+  themselves: `startGame` opens on `WORD_SELECTION` exactly as `CUSTOM_WORD`
+  does (see that section — the impostor's own word is excluded, the category is
+  `Special`, and the submissions are never broadcast), and once the phase
+  resolves the game continues as `ORIGINAL`.
+- Every round runs `ORDER_INFO → VOTING → RESULTS`. `DRAWING` is never reached,
+  so `canvasStrokes`, `roundTime`, the turn timer, the emergency vote **and the
+  vote-kick** are all inert in these modes.
+- The word is the same for the whole game, as in `CLASSIC`.
+
+**The order (`turnOrderMode`)**
+
+`turnOrder` is the array drawn at `startGame`. The option decides how much of it
+the game hands out, and whether it is drawn again on every round. The client
+reads the starting player as the first non-ejected entry:
+
+| Value | What `ORDER_INFO` announces | Redrawn each round |
+|---|---|---|
+| `RANDOM_STARTER` *(default)* | Only who opens the round; the table decides the rest | No |
+| `FIXED_ORDER` | The full ordered list of players | No |
+| `RANDOM_ORDER` | The full ordered list of players | **Yes** |
+
+Only `RANDOM_ORDER` reshuffles `turnOrder` in `checkAllConfirmedNewRound` (after
+the ejected players are dropped, so they never come back). In the other two the
+same player opens every round. When that starter is ejected, the filter alone
+hands the start to the next player in the order.
+
+**Hiding the hint (`hideHint`)**
+
+Turns the category off **for the impostor only**, so they walk in completely
+blind. It is enforced on the server in two places, because the category travels
+in two payloads: `roleAssignment` and the broadcast state (where it is *not*
+sanitised, unlike `secretWord`). Both are stripped for the impostor's socket
+until `RESULTS`, where everything is revealed.
+
+---
+
 ## Impostor Guess (optional feature)
 
 Lets the Inkpostor win by guessing the secret word. Configured by the host in the
@@ -228,7 +298,7 @@ lobby, and only available in `CLASSIC` mode (see Custom Word Mode above):
 |---|---|---|
 | `impostorId` | ❌ Hidden (`null`) — including during `IMPOSTOR_GUESS` | ✅ Revealed |
 | `secretWord` | ✅ Crewmates only (via `roleAssignment`); never sent to the impostor | ✅ All |
-| `secretCategory` | ✅ Everyone (via `roleAssignment`) | ✅ All |
+| `secretCategory` | ✅ Everyone (via `roleAssignment` **and** the broadcast state) — except the impostor when `hideHint` is on, where it is stripped from both | ✅ All |
 | `players[].customWord` | ❌ Stripped from every broadcast (only `hasSubmittedWord` is sent) | ❌ Still stripped |
 | `kickVotes` | ✅ Everyone (vote counts visible) | ✅ All |
 | `impostorGuessesUsed` | ✅ Sent privately to the impostor (not broadcast on wrong guesses) | ✅ All |
@@ -248,6 +318,7 @@ lobby, and only available in `CLASSIC` mode (see Custom Word Mode above):
 | `submitCustomWord` | WORD_SELECTION | Player submits their word (payload: `{ word }`) |
 | `proceedToDrawing` | ROLE_REVEAL | Player confirms role |
 | `confirmNewWord` | WORD_REVEAL | Player confirms they have seen the new word of the round |
+| `confirmOrder` | ORDER_INFO | Player confirms they have read who starts the round |
 | `drawStroke` | DRAWING | Current turn player draws a stroke |
 | `undoStroke` | DRAWING | Current turn player undoes last stroke |
 | `endTurn` | DRAWING | Current turn player ends their turn |
