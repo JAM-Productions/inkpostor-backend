@@ -1039,6 +1039,49 @@ describe('gameManager', () => {
             expect(result!.gameOptions.hideHint).toBe(true);
         });
 
+        it('should keep turnOrderMode across a detour through another mode', () => {
+            const room = createRoom('original-order-kept', 'host1');
+            joinRoom('original-order-kept', createPlayer('host1', 'Host'));
+            updateGameOptions('original-order-kept', 'host1', {
+                gameMode: 'ORIGINAL',
+                turnOrderMode: 'RANDOM_ORDER',
+            });
+
+            // Deliberately NOT locked like hideHint: the option is only ever
+            // read in a spoken mode, so carrying it is inert rather than
+            // dangerous, and the host keeps the order they chose.
+            updateGameOptions('original-order-kept', 'host1', {
+                gameMode: 'CLASSIC',
+            });
+            expect(room.gameOptions.turnOrderMode).toBe('RANDOM_ORDER');
+
+            updateGameOptions('original-order-kept', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
+            expect(room.gameOptions.turnOrderMode).toBe('RANDOM_ORDER');
+        });
+
+        it('should ignore turnOrderMode outside a spoken mode', () => {
+            const room = createRoom('classic-order-inert', 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom('classic-order-inert', createPlayer(pid, pid))
+            );
+            updateGameOptions('classic-order-inert', 'host1', {
+                turnOrderMode: 'RANDOM_ORDER',
+            });
+            startGame('classic-order-inert', 'host1');
+            const order = [...room.turnOrder];
+            room.phase = 'RESULTS';
+
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                nextRound('classic-order-inert', pid)
+            );
+
+            // CLASSIC never redraws the order, whatever turnOrderMode says
+            expect(room.phase).toBe('DRAWING');
+            expect(room.turnOrder).toEqual(order);
+        });
+
         it('should force hideHint off in every other mode', () => {
             const room = createRoom('original-hide-hint', 'host1');
             joinRoom('original-hide-hint', createPlayer('host1', 'Host'));
