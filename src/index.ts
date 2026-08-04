@@ -50,7 +50,11 @@ const corsOptions = {
 
 const limiter = rateLimit({
     windowMs: 60 * 1000,
-    max: process.env.NODE_ENV === 'test' || process.env.DISABLE_RATE_LIMIT === 'true' ? 10000 : 10,
+    max:
+        process.env.NODE_ENV === 'test' ||
+        process.env.DISABLE_RATE_LIMIT === 'true'
+            ? 10000
+            : 10,
     message: 'Too many requests, please try again later',
 });
 
