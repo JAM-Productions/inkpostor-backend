@@ -27,7 +27,6 @@ import {
     updateGameOptions,
     submitImpostorGuess,
     skipImpostorGuess,
-    setGameMode,
     submitCustomWord,
     confirmNewWord,
     confirmOrder,
@@ -258,22 +257,6 @@ io.on('connection', (socket: Socket) => {
             // CUSTOM_WORD mode the game starts in WORD_SELECTION and there is no
             // word yet, so roles are only revealed once the players choose it.
             broadcastRoomUpdate(roomId);
-        }
-    });
-
-    socket.on('setGameMode', (payload: unknown) => {
-        const user = socket.user;
-        const roomId = socketToRoom[socket.id];
-        if (!roomId) return;
-        const mode =
-            typeof payload === 'string'
-                ? payload
-                : isObjectWithGameMode(payload)
-                  ? payload.gameMode
-                  : undefined;
-        const room = setGameMode(roomId, user.userId, mode);
-        if (room) {
-            broadcastGameState(roomId);
         }
     });
 
@@ -719,10 +702,6 @@ function isObjectWithGuess(
     value: unknown
 ): value is { guess?: string; language?: string } {
     return typeof value === 'object' && value !== null && 'guess' in value;
-}
-
-function isObjectWithGameMode(value: unknown): value is { gameMode?: unknown } {
-    return typeof value === 'object' && value !== null && 'gameMode' in value;
 }
 
 function isObjectWithWord(value: unknown): value is { word?: unknown } {

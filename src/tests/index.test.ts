@@ -735,7 +735,7 @@ describe('Server API and Socket Integration Tests', () => {
                 playerSocket,
                 'gameStateUpdate'
             );
-            hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+            hostSocket.emit('updateGameOptions', { gameMode: 'CUSTOM_WORD' });
 
             const [hostState, playerState] = await Promise.all([
                 nextHostState,
@@ -745,7 +745,7 @@ describe('Server API and Socket Integration Tests', () => {
             expect(playerState.gameMode).toBe('CUSTOM_WORD');
 
             // A non-host trying to change the mode is ignored
-            playerSocket.emit('setGameMode', { gameMode: 'CLASSIC' });
+            playerSocket.emit('updateGameOptions', { gameMode: 'CLASSIC' });
             await new Promise((resolve) => setTimeout(resolve, 100));
             expect(getRoom(roomId)?.gameMode).toBe('CUSTOM_WORD');
 
@@ -781,7 +781,7 @@ describe('Server API and Socket Integration Tests', () => {
                 await joined;
             }
 
-            hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+            hostSocket.emit('updateGameOptions', { gameMode: 'CUSTOM_WORD' });
             await new Promise((resolve) => setTimeout(resolve, 100));
 
             // Roles must NOT be handed out before the word exists
@@ -877,7 +877,7 @@ describe('Server API and Socket Integration Tests', () => {
             await joined;
         }
 
-        hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+        hostSocket.emit('updateGameOptions', { gameMode: 'CUSTOM_WORD' });
         await new Promise((resolve) => setTimeout(resolve, 100));
         hostSocket.emit('startGame');
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -953,7 +953,7 @@ describe('Server API and Socket Integration Tests', () => {
                 await joined;
             }
 
-            hostSocket.emit('setGameMode', { gameMode: 'HOT_WORD' });
+            hostSocket.emit('updateGameOptions', { gameMode: 'HOT_WORD' });
             await new Promise((resolve) => setTimeout(resolve, 100));
 
             const firstRoles = sockets.map((s) =>
@@ -1057,7 +1057,7 @@ describe('Server API and Socket Integration Tests', () => {
                 await joined;
             }
 
-            hostSocket.emit('setGameMode', { gameMode });
+            hostSocket.emit('updateGameOptions', { gameMode });
             await new Promise((resolve) => setTimeout(resolve, 100));
 
             return { sockets, userIds, hostSocket };

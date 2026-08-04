@@ -19,7 +19,6 @@ import {
     updateGameOptions,
     submitImpostorGuess,
     skipImpostorGuess,
-    setGameMode,
     submitCustomWord,
     confirmNewWord,
     confirmOrder,
@@ -354,7 +353,9 @@ describe('gameManager', () => {
             ['p1', 'p2', 'p3'].forEach((id) =>
                 joinRoom('room-start-custom', createPlayer(id, id))
             );
-            setGameMode('room-start-custom', 'host1', 'CUSTOM_WORD');
+            updateGameOptions('room-start-custom', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
 
             const result = startGame('room-start-custom', 'host1');
             expect(result!.phase).toBe('WORD_SELECTION');
@@ -367,7 +368,7 @@ describe('gameManager', () => {
         });
     });
 
-    describe('setGameMode', () => {
+    describe('game mode via updateGameOptions', () => {
         const setupLobby = (id: string) => {
             const room = createRoom(id, 'host1');
             joinRoom(id, createPlayer('host1', 'Host'));
@@ -377,21 +378,64 @@ describe('gameManager', () => {
 
         it('should let the host switch mode from the lobby', () => {
             setupLobby('mode-ok');
-            const result = setGameMode('mode-ok', 'host1', 'CUSTOM_WORD');
+            const result = updateGameOptions('mode-ok', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
             expect(result!.gameMode).toBe('CUSTOM_WORD');
 
-            const back = setGameMode('mode-ok', 'host1', 'CLASSIC');
+            const back = updateGameOptions('mode-ok', 'host1', {
+                gameMode: 'CLASSIC',
+            });
             expect(back!.gameMode).toBe('CLASSIC');
         });
 
-        it('should reject non-hosts, unknown modes and missing rooms', () => {
+        it('should reject non-hosts and missing rooms', () => {
             const room = setupLobby('mode-invalid');
 
-            expect(setGameMode('mode-invalid', 'p2', 'CUSTOM_WORD')).toBeNull();
-            expect(setGameMode('mode-invalid', 'host1', 'NOPE')).toBeNull();
-            expect(setGameMode('mode-invalid', 'host1', undefined)).toBeNull();
-            expect(setGameMode('missing-room', 'host1', 'CLASSIC')).toBeNull();
+            expect(
+                updateGameOptions('mode-invalid', 'p2', {
+                    gameMode: 'CUSTOM_WORD',
+                })
+            ).toBeNull();
+            expect(
+                updateGameOptions('missing-room', 'host1', {
+                    gameMode: 'CLASSIC',
+                })
+            ).toBeNull();
             expect(room.gameMode).toBe('CLASSIC');
+        });
+
+        it('should ignore an unknown mode without dropping the rest of the update', () => {
+            const room = setupLobby('mode-unknown');
+
+            // Same treatment as any other bad field: skipped, not fatal
+            const result = updateGameOptions('mode-unknown', 'host1', {
+                gameMode: 'NOPE',
+                roundTime: 40,
+            });
+
+            expect(result).not.toBeNull();
+            expect(room.gameMode).toBe('CLASSIC');
+            expect(room.gameOptions.roundTime).toBe(40);
+
+            updateGameOptions('mode-unknown', 'host1', { gameMode: undefined });
+            expect(room.gameMode).toBe('CLASSIC');
+        });
+
+        it('should apply the mode before the options it takes over', () => {
+            const room = setupLobby('mode-atomic');
+
+            // The host staged a drawing setting and switched mode in the same
+            // save. The mode wins: it is applied first, then locks the option.
+            const result = updateGameOptions('mode-atomic', 'host1', {
+                gameMode: 'ORIGINAL',
+                roundTime: 40,
+                unlimitedInk: true,
+            });
+
+            expect(result!.gameMode).toBe('ORIGINAL');
+            expect(room.gameOptions.roundTime).toBe(DEFAULT_ROUND_TIME);
+            expect(room.gameOptions.unlimitedInk).toBe(false);
         });
 
         it('should reject mode changes once the game has started', () => {
@@ -399,7 +443,11 @@ describe('gameManager', () => {
             joinRoom('mode-late', createPlayer('p3', 'Charlie'));
             startGame('mode-late', 'host1');
 
-            expect(setGameMode('mode-late', 'host1', 'CUSTOM_WORD')).toBeNull();
+            expect(
+                updateGameOptions('mode-late', 'host1', {
+                    gameMode: 'CUSTOM_WORD',
+                })
+            ).toBeNull();
             expect(room.gameMode).toBe('CLASSIC');
         });
 
@@ -410,13 +458,17 @@ describe('gameManager', () => {
             });
             expect(room.gameOptions.impostorGuessEnabled).toBe(true);
 
-            setGameMode('mode-guess-off', 'host1', 'CUSTOM_WORD');
+            updateGameOptions('mode-guess-off', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
             expect(room.gameOptions.impostorGuessEnabled).toBe(false);
         });
 
         it('should reject enabling the impostor guess while CUSTOM_WORD is selected', () => {
             const room = setupLobby('mode-guess-locked');
-            setGameMode('mode-guess-locked', 'host1', 'CUSTOM_WORD');
+            updateGameOptions('mode-guess-locked', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
 
             const result = updateGameOptions('mode-guess-locked', 'host1', {
                 impostorGuessEnabled: true,
@@ -428,7 +480,9 @@ describe('gameManager', () => {
             expect(result!.gameOptions.roundTime).toBe(40);
 
             // ...and it becomes settable again back in CLASSIC
-            setGameMode('mode-guess-locked', 'host1', 'CLASSIC');
+            updateGameOptions('mode-guess-locked', 'host1', {
+                gameMode: 'CLASSIC',
+            });
             updateGameOptions('mode-guess-locked', 'host1', {
                 impostorGuessEnabled: true,
             });
@@ -438,7 +492,9 @@ describe('gameManager', () => {
         it('should survive playAgain', () => {
             const room = setupLobby('mode-again');
             joinRoom('mode-again', createPlayer('p3', 'Charlie'));
-            setGameMode('mode-again', 'host1', 'CUSTOM_WORD');
+            updateGameOptions('mode-again', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
             startGame('mode-again', 'host1');
 
             playAgain('mode-again', 'host1');
@@ -456,7 +512,7 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom(id, createPlayer(pid, pid))
             );
-            setGameMode(id, 'host1', 'CUSTOM_WORD');
+            updateGameOptions(id, 'host1', { gameMode: 'CUSTOM_WORD' });
             startGame(id, 'host1');
             room.impostorId = impostorId;
             return room;
@@ -590,7 +646,7 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom(id, createPlayer(pid, pid))
             );
-            setGameMode(id, 'host1', 'HOT_WORD');
+            updateGameOptions(id, 'host1', { gameMode: 'HOT_WORD' });
             startGame(id, 'host1');
             room.impostorId = 'host1';
             room.phase = 'RESULTS';
@@ -605,7 +661,7 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom('hot-start', createPlayer(pid, pid))
             );
-            setGameMode('hot-start', 'host1', 'HOT_WORD');
+            updateGameOptions('hot-start', 'host1', { gameMode: 'HOT_WORD' });
 
             const result = startGame('hot-start', 'host1');
             expect(result!.phase).toBe('ROLE_REVEAL');
@@ -737,7 +793,7 @@ describe('gameManager', () => {
             });
             expect(room.gameOptions.clearCanvasEachRound).toBe(false);
 
-            setGameMode('hot-options', 'host1', 'HOT_WORD');
+            updateGameOptions('hot-options', 'host1', { gameMode: 'HOT_WORD' });
             expect(room.gameOptions.clearCanvasEachRound).toBe(true);
 
             const result = updateGameOptions('hot-options', 'host1', {
@@ -749,7 +805,7 @@ describe('gameManager', () => {
             expect(result!.gameOptions.roundTime).toBe(40);
 
             // ...and it becomes settable again back in CLASSIC
-            setGameMode('hot-options', 'host1', 'CLASSIC');
+            updateGameOptions('hot-options', 'host1', { gameMode: 'CLASSIC' });
             updateGameOptions('hot-options', 'host1', {
                 clearCanvasEachRound: false,
             });
@@ -759,7 +815,7 @@ describe('gameManager', () => {
         it('should allow the impostor guess, unlike CUSTOM_WORD', () => {
             const room = createRoom('hot-guess', 'host1');
             joinRoom('hot-guess', createPlayer('host1', 'Host'));
-            setGameMode('hot-guess', 'host1', 'HOT_WORD');
+            updateGameOptions('hot-guess', 'host1', { gameMode: 'HOT_WORD' });
 
             updateGameOptions('hot-guess', 'host1', {
                 impostorGuessEnabled: true,
@@ -774,7 +830,7 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom(id, createPlayer(pid, pid))
             );
-            setGameMode(id, 'host1', 'ORIGINAL');
+            updateGameOptions(id, 'host1', { gameMode: 'ORIGINAL' });
             startGame(id, 'host1');
             room.impostorId = 'host1';
             return room;
@@ -961,7 +1017,9 @@ describe('gameManager', () => {
                 impostorGuessEnabled: true,
             });
 
-            setGameMode('original-options', 'host1', 'ORIGINAL');
+            updateGameOptions('original-options', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
             expect(room.gameOptions).toMatchObject({
                 roundTime: DEFAULT_ROUND_TIME,
                 unlimitedInk: false,
@@ -984,13 +1042,17 @@ describe('gameManager', () => {
         it('should force hideHint off in every other mode', () => {
             const room = createRoom('original-hide-hint', 'host1');
             joinRoom('original-hide-hint', createPlayer('host1', 'Host'));
-            setGameMode('original-hide-hint', 'host1', 'ORIGINAL');
+            updateGameOptions('original-hide-hint', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
             updateGameOptions('original-hide-hint', 'host1', {
                 hideHint: true,
             });
             expect(room.gameOptions.hideHint).toBe(true);
 
-            setGameMode('original-hide-hint', 'host1', 'CLASSIC');
+            updateGameOptions('original-hide-hint', 'host1', {
+                gameMode: 'CLASSIC',
+            });
             expect(room.gameOptions.hideHint).toBe(false);
 
             // A mode whose options screen cannot show it must not keep it on
@@ -1003,7 +1065,9 @@ describe('gameManager', () => {
         it('should only accept known turn order modes', () => {
             const room = createRoom('original-order-mode', 'host1');
             joinRoom('original-order-mode', createPlayer('host1', 'Host'));
-            setGameMode('original-order-mode', 'host1', 'ORIGINAL');
+            updateGameOptions('original-order-mode', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
             expect(room.gameOptions.turnOrderMode).toBe(
                 DEFAULT_TURN_ORDER_MODE
             );
@@ -1042,7 +1106,7 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom(id, createPlayer(pid, pid))
             );
-            setGameMode(id, 'host1', 'ORIGINAL_CHAOS');
+            updateGameOptions(id, 'host1', { gameMode: 'ORIGINAL_CHAOS' });
             return room;
         };
 

@@ -296,20 +296,11 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     return room;
 }
 
-export function setGameMode(
-    roomId: string,
-    userId: string,
-    mode: unknown
-): GameRoom | null {
-    const room = rooms[roomId];
-    if (!room || room.phase !== 'LOBBY') return null;
-    if (room.hostId !== userId) return null;
-    if (!GAME_MODES.includes(mode as GameMode)) return null;
+// Unknown modes are ignored rather than rejected, like every other field of the
+// options payload: a stray value must not throw away the rest of the update.
+function applyGameMode(room: GameRoom, mode: unknown) {
+    if (!GAME_MODES.includes(mode as GameMode)) return;
     room.gameMode = mode as GameMode;
-    // Switching mode applies whatever options the new mode takes over, instead
-    // of leaving settings the mode would ignore.
-    room.gameOptions = applyModeLockedOptions(room.gameOptions, room.gameMode);
-    return room;
 }
 
 // Resolves WORD_SELECTION once every player who can still answer has submitted.
@@ -942,6 +933,10 @@ export function voteKickPlayer(
     return room;
 }
 
+// The game mode is staged in the options modal alongside everything else and
+// travels with this payload, so it is applied *before* the options are
+// sanitised: whatever the new mode takes over wins over what the host had
+// staged for the previous one.
 export function updateGameOptions(
     roomId: string,
     userId: string,
@@ -950,6 +945,9 @@ export function updateGameOptions(
     const room = rooms[roomId];
     if (!room || room.phase !== 'LOBBY') return null;
     if (room.hostId !== userId) return null;
+    if (!isPlainObject(options)) return null;
+
+    applyGameMode(room, options.gameMode);
     const sanitizedOptions = sanitizeGameOptionsUpdate(
         options,
         room.gameOptions,

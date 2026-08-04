@@ -2,10 +2,16 @@
 
 ## Game Modes
 
-The host picks the mode from the lobby options carousel. Unlike `gameOptions`
-(staged until the host confirms), the mode is applied **immediately** on every
-carousel change via the `setGameMode` event, so it lives in its own `gameMode`
-field on the room. It survives `playAgain`.
+The host picks the mode from the lobby options carousel. Like the rest of the
+options it is **staged in the modal until the host confirms**, and travels with
+the `updateGameOptions` payload as a `gameMode` field. It still lives in its own
+`room.gameMode` field rather than inside `gameOptions`, and survives `playAgain`.
+
+`updateGameOptions` applies the mode **before** sanitising the options, so a save
+that changes both at once resolves the way the host sees it in the modal: the new
+mode's locks win over whatever was staged for the previous one. An unknown mode
+is ignored rather than rejected, like every other bad field — a stray value must
+not throw away the rest of the update.
 
 | Mode | Description |
 |---|---|
@@ -25,10 +31,10 @@ mode means listing it there, not hunting down every comparison:
 | `isPlayerWordMode` | `CUSTOM_WORD`, `ORIGINAL_CHAOS` | The game opens on `WORD_SELECTION`, and the word is sent verbatim instead of through the translation table |
 
 Some modes take an option over. While such a mode is selected the value is
-forced and the host cannot change it — `setGameMode` applies it and
-`updateGameOptions` keeps re-applying it, so a modified client cannot get around
-it. `MODE_LOCKED_OPTIONS` (in `constants.ts`) is the single source of truth,
-mirrored by the options modal in the client:
+forced and the host cannot change it — `updateGameOptions` re-applies the table
+on every save, so a modified client cannot get around it. `MODE_LOCKED_OPTIONS`
+(in `constants.ts`) is the single source of truth, mirrored by the options modal
+in the client:
 
 | Mode | Locked option | Why |
 |---|---|---|
@@ -313,7 +319,7 @@ lobby, and only available in `CLASSIC` mode (see Custom Word Mode above):
 |---|---|---|
 | `createRoom` | LOBBY | Host creates a new room |
 | `joinRoom` | LOBBY | Player joins an existing room |
-| `setGameMode` | LOBBY | Host selects a game mode from the carousel (host only, applied immediately) |
+| `updateGameOptions` | LOBBY | Host saves the staged options, game mode included (host only, payload: `GameOptions & { gameMode }`) |
 | `startGame` | LOBBY | Host starts the game (host only) |
 | `submitCustomWord` | WORD_SELECTION | Player submits their word (payload: `{ word }`) |
 | `proceedToDrawing` | ROLE_REVEAL | Player confirms role |
