@@ -597,6 +597,8 @@ describe('Server API and Socket Integration Tests', () => {
                 playerColorsEnabled: true,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
+                hideHint: false,
+                turnOrderMode: 'RANDOM_STARTER',
             };
 
             hostSocket.emit('updateGameOptions', updatedOptions);
@@ -672,6 +674,8 @@ describe('Server API and Socket Integration Tests', () => {
                 playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
+                hideHint: false,
+                turnOrderMode: 'RANDOM_STARTER',
             });
             expect(playerState.gameOptions).toEqual(hostState.gameOptions);
 
@@ -731,7 +735,7 @@ describe('Server API and Socket Integration Tests', () => {
                 playerSocket,
                 'gameStateUpdate'
             );
-            hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+            hostSocket.emit('updateGameOptions', { gameMode: 'CUSTOM_WORD' });
 
             const [hostState, playerState] = await Promise.all([
                 nextHostState,
@@ -741,7 +745,7 @@ describe('Server API and Socket Integration Tests', () => {
             expect(playerState.gameMode).toBe('CUSTOM_WORD');
 
             // A non-host trying to change the mode is ignored
-            playerSocket.emit('setGameMode', { gameMode: 'CLASSIC' });
+            playerSocket.emit('updateGameOptions', { gameMode: 'CLASSIC' });
             await new Promise((resolve) => setTimeout(resolve, 100));
             expect(getRoom(roomId)?.gameMode).toBe('CUSTOM_WORD');
 
@@ -777,7 +781,7 @@ describe('Server API and Socket Integration Tests', () => {
                 await joined;
             }
 
-            hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+            hostSocket.emit('updateGameOptions', { gameMode: 'CUSTOM_WORD' });
             await new Promise((resolve) => setTimeout(resolve, 100));
 
             // Roles must NOT be handed out before the word exists
@@ -873,7 +877,7 @@ describe('Server API and Socket Integration Tests', () => {
             await joined;
         }
 
-        hostSocket.emit('setGameMode', { gameMode: 'CUSTOM_WORD' });
+        hostSocket.emit('updateGameOptions', { gameMode: 'CUSTOM_WORD' });
         await new Promise((resolve) => setTimeout(resolve, 100));
         hostSocket.emit('startGame');
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -949,7 +953,7 @@ describe('Server API and Socket Integration Tests', () => {
                 await joined;
             }
 
-            hostSocket.emit('setGameMode', { gameMode: 'HOT_WORD' });
+            hostSocket.emit('updateGameOptions', { gameMode: 'HOT_WORD' });
             await new Promise((resolve) => setTimeout(resolve, 100));
 
             const firstRoles = sockets.map((s) =>
@@ -1012,6 +1016,176 @@ describe('Server API and Socket Integration Tests', () => {
                 await new Promise((resolve) => setTimeout(resolve, 50));
             }
             expect(getRoom(roomId)!.phase).toBe('DRAWING');
+
+            sockets.forEach((s) => s.disconnect());
+        }, 20_000);
+    });
+
+    describe('Socket Original Mode Flow', () => {
+        interface RoleAssignment {
+            isImpostor: boolean;
+            secretWord: string | null;
+            secretCategory: string | null;
+        }
+
+        // Lobby of three players sitting in a spoken mode, ready to start.
+        const setupLobby = async (
+            roomId: string,
+            idSuffix: string,
+            gameMode: string = 'ORIGINAL'
+        ) => {
+            const userIds = [0, 1, 2].map(
+                (n) => `00000000-0000-4000-8000-0000000000${idSuffix}${n}`
+            );
+            const sockets = await Promise.all(
+                userIds.map(async (userId, index) =>
+                    connectSocket(await getToken(`OrigP${index}`, userId))
+                )
+            );
+            const [hostSocket] = sockets;
+
+            const roomCreated = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('createRoom', { roomId });
+            await roomCreated;
+
+            for (const s of sockets.slice(1)) {
+                const joined = waitForEvent<GameRoom>(s, 'gameStateUpdate');
+                s.emit('joinRoom', { roomId });
+                await joined;
+            }
+
+            hostSocket.emit('updateGameOptions', { gameMode });
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            return { sockets, userIds, hostSocket };
+        };
+
+        it('should run ROLE_REVEAL -> ORDER_INFO -> VOTING without ever drawing', async () => {
+            const roomId = 'original-socket-room';
+            const { sockets, hostSocket } = await setupLobby(roomId, '5');
+
+            const roles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            hostSocket.emit('startGame');
+            await Promise.all(roles);
+            expect(getRoom(roomId)!.phase).toBe('ROLE_REVEAL');
+
+            for (const s of sockets) {
+                s.emit('proceedToDrawing');
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('ORDER_INFO');
+
+            // The order screen is a read-receipt gate: nothing moves until the
+            // last player confirms.
+            for (const s of sockets.slice(0, -1)) {
+                s.emit('confirmOrder');
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('ORDER_INFO');
+
+            const votingReached = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            sockets[sockets.length - 1].emit('confirmOrder');
+            const state = await votingReached;
+
+            expect(state.phase).toBe('VOTING');
+            expect(getRoom(roomId)!.canvasStrokes).toEqual([]);
+
+            sockets.forEach((s) => s.disconnect());
+        }, 20_000);
+
+        it('should keep the category from the impostor when hideHint is on', async () => {
+            const roomId = 'original-hide-hint-room';
+            const { sockets, userIds, hostSocket } = await setupLobby(
+                roomId,
+                '6'
+            );
+
+            hostSocket.emit('updateGameOptions', { hideHint: true });
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            expect(getRoom(roomId)!.gameOptions.hideHint).toBe(true);
+
+            const roles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            const states = sockets.map((s) =>
+                waitForEvent<GameRoom>(s, 'gameStateUpdate')
+            );
+            hostSocket.emit('startGame');
+            const [assignments, gameStates] = await Promise.all([
+                Promise.all(roles),
+                Promise.all(states),
+            ]);
+
+            const impostorId = getRoom(roomId)!.impostorId;
+            assignments.forEach((assignment, index) => {
+                const isImpostor = userIds[index] === impostorId;
+                expect(assignment.isImpostor).toBe(isImpostor);
+                // The category must be missing from BOTH payloads: it rides
+                // along in the broadcast state as well as in the role.
+                if (isImpostor) {
+                    expect(assignment.secretCategory).toBeNull();
+                    expect(gameStates[index].secretCategory).toBeNull();
+                } else {
+                    expect(assignment.secretCategory).not.toBeNull();
+                    expect(assignment.secretWord).not.toBeNull();
+                }
+            });
+
+            sockets.forEach((s) => s.disconnect());
+        }, 20_000);
+
+        it('should open ORIGINAL_CHAOS on WORD_SELECTION and never translate the written word', async () => {
+            const roomId = 'original-chaos-room';
+            const { sockets, userIds, hostSocket } = await setupLobby(
+                roomId,
+                '7',
+                'ORIGINAL_CHAOS'
+            );
+
+            // Everyone plays in Spanish, and the word they write is also a key
+            // of the translation table — it must still arrive exactly as typed.
+            sockets.forEach((s) => s.emit('setLanguage', { language: 'es' }));
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            const started = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('startGame');
+            expect((await started).phase).toBe('WORD_SELECTION');
+
+            const impostorId = getRoom(roomId)!.impostorId;
+            const roles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            for (const s of sockets) {
+                s.emit('submitCustomWord', { word: 'Dog' });
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            const assignments = await Promise.all(roles);
+
+            expect(getRoom(roomId)!.phase).toBe('ROLE_REVEAL');
+            assignments.forEach((assignment, index) => {
+                if (userIds[index] === impostorId) return;
+                // "Perro" would mean the player-written word went through the
+                // translation table
+                expect(assignment.secretWord).toBe('Dog');
+            });
+
+            // ...and from there it runs as ORIGINAL: no drawing
+            for (const s of sockets) {
+                s.emit('proceedToDrawing');
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('ORDER_INFO');
 
             sockets.forEach((s) => s.disconnect());
         }, 20_000);

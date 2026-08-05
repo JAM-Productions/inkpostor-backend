@@ -14,6 +14,7 @@ export type GamePhase =
     | 'WORD_SELECTION'
     | 'ROLE_REVEAL'
     | 'WORD_REVEAL'
+    | 'ORDER_INFO'
     | 'DRAWING'
     | 'VOTING'
     | 'IMPOSTOR_GUESS'
@@ -22,7 +23,22 @@ export type GamePhase =
 // CLASSIC: the secret word is drawn from the built-in word list.
 // CUSTOM_WORD: every player writes a word and one of them becomes the secret.
 // HOT_WORD: like CLASSIC, but a new word is drawn on every round.
-export type GameMode = 'CLASSIC' | 'CUSTOM_WORD' | 'HOT_WORD';
+// ORIGINAL: the in-person party game — players say words out loud instead of
+// drawing, so there is no DRAWING phase at all (see ORDER_INFO).
+// ORIGINAL_CHAOS: ORIGINAL played with a word the players write themselves, so
+// it opens on WORD_SELECTION like CUSTOM_WORD does.
+export type GameMode =
+    | 'CLASSIC'
+    | 'CUSTOM_WORD'
+    | 'HOT_WORD'
+    | 'ORIGINAL'
+    | 'ORIGINAL_CHAOS';
+
+// ORIGINAL mode: how much of the speaking order the game hands out.
+// RANDOM_STARTER only names who opens the round and leaves the rest to the
+// table; FIXED_ORDER hands out the whole order and keeps it for the whole game;
+// RANDOM_ORDER draws that whole order again on every round.
+export type TurnOrderMode = 'RANDOM_STARTER' | 'FIXED_ORDER' | 'RANDOM_ORDER';
 
 export interface Player {
     id: string; // Socket ID or UUID
@@ -34,6 +50,8 @@ export interface Player {
     hasRevealedRole?: boolean;
     // HOT_WORD mode only: confirmation of the WORD_REVEAL screen of this round.
     hasRevealedNewWord?: boolean;
+    // ORIGINAL mode only: confirmation of the ORDER_INFO screen of this round.
+    hasConfirmedOrder?: boolean;
     hasConfirmedNewRound?: boolean;
     hasStartedEmergencyVoting: boolean;
     language?: string;
@@ -56,6 +74,8 @@ export interface GameOptions {
     playerColorsEnabled: boolean;
     impostorGuessEnabled: boolean;
     impostorGuessAttempts: number;
+    hideHint: boolean;
+    turnOrderMode: TurnOrderMode;
 }
 
 export interface GameRoom {

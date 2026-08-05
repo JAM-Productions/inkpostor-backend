@@ -1,4 +1,11 @@
-import { GameMode, GameOptions, GameRoom, Player, StrokeData } from './types';
+import {
+    GameMode,
+    GameOptions,
+    GameRoom,
+    Player,
+    StrokeData,
+    TurnOrderMode,
+} from './types';
 import wordData from './data.json';
 import wordTranslations from './wordTranslations.json';
 import {
@@ -6,7 +13,10 @@ import {
     DEFAULT_GAME_MODE,
     DEFAULT_IMPOSTOR_GUESSES,
     DEFAULT_ROUND_TIME,
+    DEFAULT_TURN_ORDER_MODE,
     GAME_MODES,
+    isPlayerWordMode,
+    isSpokenMode,
     MAX_CUSTOM_WORD_LENGTH,
     MODE_LOCKED_OPTIONS,
     MAX_IMPOSTOR_GUESSES,
@@ -14,6 +24,7 @@ import {
     MIN_CUSTOM_WORD_LENGTH,
     MIN_IMPOSTOR_GUESSES,
     SPECIAL_CATEGORY,
+    TURN_ORDER_MODES,
 } from './constants';
 
 const rooms: Record<string, GameRoom> = {};
@@ -76,6 +87,12 @@ function sanitizeGameOptionsUpdate(
             Math.max(MIN_IMPOSTOR_GUESSES, rounded)
         );
     }
+    if (typeof options.hideHint === 'boolean') {
+        nextOptions.hideHint = options.hideHint;
+    }
+    if (TURN_ORDER_MODES.includes(options.turnOrderMode as TurnOrderMode)) {
+        nextOptions.turnOrderMode = options.turnOrderMode as TurnOrderMode;
+    }
 
     return applyModeLockedOptions(nextOptions, gameMode);
 }
@@ -106,6 +123,8 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
             playerColorsEnabled: false,
             impostorGuessEnabled: false,
             impostorGuessAttempts: DEFAULT_IMPOSTOR_GUESSES,
+            hideHint: false,
+            turnOrderMode: DEFAULT_TURN_ORDER_MODE,
         },
         gameMode: DEFAULT_GAME_MODE,
         usedWords: [],
@@ -192,6 +211,18 @@ function pickRandom<T>(items: T[]): T {
     return items[Math.floor(Math.random() * items.length)];
 }
 
+// Fisher-Yates. The usual `sort(() => Math.random() - 0.5)` shortcut is biased
+// towards leaving items near where they started, which becomes visible once
+// RANDOM_ORDER redraws the order round after round.
+function shuffle<T>(items: T[]): T[] {
+    const shuffled = [...items];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
+
 // Draws a word (and its category) from the built-in word list, avoiding words
 // already played in this game. Falls back to the full list once they run out.
 function assignRandomWord(room: GameRoom) {
@@ -227,9 +258,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     room.impostorId = room.players[impostorIndex].id;
 
     // Setup Turns
-    room.turnOrder = room.players
-        .map((p) => p.id)
-        .sort(() => Math.random() - 0.5);
+    room.turnOrder = shuffle(room.players.map((p) => p.id));
     room.turnIndex = 0;
     room.currentTurnPlayerId = room.turnOrder[0];
 
@@ -242,6 +271,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
         p.isEjected = false;
         p.hasRevealedRole = false;
         p.hasRevealedNewWord = false;
+        p.hasConfirmedOrder = false;
         p.hasConfirmedNewRound = false;
         p.hasStartedEmergencyVoting = false;
         p.customWord = null;
@@ -253,7 +283,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     room.impostorGuessesUsed = 0;
     room.impostorGuessedCorrectly = false;
 
-    if (room.gameMode === 'CUSTOM_WORD') {
+    if (isPlayerWordMode(room.gameMode)) {
         // The word comes from the players, so it isn't known yet.
         room.secretWord = null;
         room.secretCategory = null;
@@ -266,20 +296,11 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     return room;
 }
 
-export function setGameMode(
-    roomId: string,
-    userId: string,
-    mode: unknown
-): GameRoom | null {
-    const room = rooms[roomId];
-    if (!room || room.phase !== 'LOBBY') return null;
-    if (room.hostId !== userId) return null;
-    if (!GAME_MODES.includes(mode as GameMode)) return null;
+// Unknown modes are ignored rather than rejected, like every other field of the
+// options payload: a stray value must not throw away the rest of the update.
+function applyGameMode(room: GameRoom, mode: unknown) {
+    if (!GAME_MODES.includes(mode as GameMode)) return;
     room.gameMode = mode as GameMode;
-    // Switching mode applies whatever options the new mode takes over, instead
-    // of leaving settings the mode would ignore.
-    room.gameOptions = applyModeLockedOptions(room.gameOptions, room.gameMode);
-    return room;
 }
 
 // Resolves WORD_SELECTION once every player who can still answer has submitted.
@@ -405,6 +426,13 @@ export function undoStroke(roomId: string, playerId: string): GameRoom | null {
     return room;
 }
 
+// Where a round actually starts. Nothing is drawn in ORIGINAL: the players say
+// their words out loud, so the round opens on the screen that tells them who
+// starts and in which direction.
+function roundStartPhase(room: GameRoom): 'ORDER_INFO' | 'DRAWING' {
+    return isSpokenMode(room.gameMode) ? 'ORDER_INFO' : 'DRAWING';
+}
+
 export function proceedToDrawing(
     roomId: string,
     playerId: string
@@ -416,8 +444,36 @@ export function proceedToDrawing(
     player.hasRevealedRole = true;
     const allRevealed = room.players.every((p) => p.hasRevealedRole);
     if (allRevealed) {
-        room.phase = 'DRAWING';
+        room.phase = roundStartPhase(room);
     }
+    return room;
+}
+
+// Resolves ORDER_INFO once every non-ejected player has confirmed. Like the
+// other reveal screens this waits for disconnected players too — a round must
+// not start behind the back of someone who is reconnecting (the host can always
+// end the game). Ejected players may watch, but are not waited for.
+function checkAllConfirmedOrder(room: GameRoom) {
+    const allConfirmed = room.players.every(
+        (p) => p.isEjected || p.hasConfirmedOrder
+    );
+    if (allConfirmed) {
+        room.phase = 'VOTING';
+    }
+}
+
+// Confirmation of the ORDER_INFO screen (ORIGINAL mode). The order itself is
+// public, so this is only a "everyone has read it" gate before voting opens.
+export function confirmOrder(
+    roomId: string,
+    playerId: string
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.phase !== 'ORDER_INFO') return null;
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player || player.isEjected) return null;
+    player.hasConfirmedOrder = true;
+    checkAllConfirmedOrder(room);
     return room;
 }
 
@@ -612,6 +668,7 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
         p.isEjected = false;
         p.hasRevealedRole = false;
         p.hasRevealedNewWord = false;
+        p.hasConfirmedOrder = false;
         p.hasConfirmedNewRound = false;
         p.hasStartedEmergencyVoting = false;
         p.customWord = null;
@@ -636,12 +693,20 @@ function checkAllConfirmedNewRound(room: GameRoom) {
     );
     if (!allConfirmed) return;
 
-    room.phase = 'DRAWING';
+    room.phase = roundStartPhase(room);
     room.currentRound++;
     room.turnOrder = room.turnOrder.filter((id) => {
         const player = room.players.find((p) => p.id === id);
         return player && !player.isEjected;
     });
+    // Only this mode redraws the order. The other two keep the one drawn at
+    // startGame, so the same player opens every round.
+    if (
+        isSpokenMode(room.gameMode) &&
+        room.gameOptions.turnOrderMode === 'RANDOM_ORDER'
+    ) {
+        room.turnOrder = shuffle(room.turnOrder);
+    }
     if (room.turnOrder.length === 0) {
         room.currentTurnPlayerId = null;
     } else {
@@ -653,6 +718,10 @@ function checkAllConfirmedNewRound(room: GameRoom) {
     room.players.forEach((p) => {
         p.hasVoted = false;
         p.hasConfirmedNewRound = false;
+        // The order screen is shown again every round, so its gate reopens.
+        // The order itself does not change: turnOrder was only filtered above
+        // to drop ejected players, which is what moves the starting player on.
+        p.hasConfirmedOrder = false;
     });
     room.ejectedId = null;
     if (room.gameOptions.clearCanvasEachRound) {
@@ -864,6 +933,10 @@ export function voteKickPlayer(
     return room;
 }
 
+// The game mode is staged in the options modal alongside everything else and
+// travels with this payload, so it is applied *before* the options are
+// sanitised: whatever the new mode takes over wins over what the host had
+// staged for the previous one.
 export function updateGameOptions(
     roomId: string,
     userId: string,
@@ -872,6 +945,9 @@ export function updateGameOptions(
     const room = rooms[roomId];
     if (!room || room.phase !== 'LOBBY') return null;
     if (room.hostId !== userId) return null;
+    if (!isPlainObject(options)) return null;
+
+    applyGameMode(room, options.gameMode);
     const sanitizedOptions = sanitizeGameOptionsUpdate(
         options,
         room.gameOptions,

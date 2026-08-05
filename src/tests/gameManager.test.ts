@@ -19,16 +19,18 @@ import {
     updateGameOptions,
     submitImpostorGuess,
     skipImpostorGuess,
-    setGameMode,
     submitCustomWord,
     confirmNewWord,
+    confirmOrder,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import {
     ALLOWED_ROUND_TIMES,
     DEFAULT_ROUND_TIME,
+    DEFAULT_TURN_ORDER_MODE,
     MAX_IMPOSTOR_GUESSES,
     MAX_NUM_PLAYERS_PER_ROOM,
+    SPECIAL_CATEGORY,
 } from '../constants';
 
 describe('gameManager', () => {
@@ -56,6 +58,8 @@ describe('gameManager', () => {
                 playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
+                hideHint: false,
+                turnOrderMode: DEFAULT_TURN_ORDER_MODE,
             });
             expect(room.gameMode).toBe('CLASSIC');
 
@@ -349,7 +353,9 @@ describe('gameManager', () => {
             ['p1', 'p2', 'p3'].forEach((id) =>
                 joinRoom('room-start-custom', createPlayer(id, id))
             );
-            setGameMode('room-start-custom', 'host1', 'CUSTOM_WORD');
+            updateGameOptions('room-start-custom', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
 
             const result = startGame('room-start-custom', 'host1');
             expect(result!.phase).toBe('WORD_SELECTION');
@@ -362,7 +368,7 @@ describe('gameManager', () => {
         });
     });
 
-    describe('setGameMode', () => {
+    describe('game mode via updateGameOptions', () => {
         const setupLobby = (id: string) => {
             const room = createRoom(id, 'host1');
             joinRoom(id, createPlayer('host1', 'Host'));
@@ -372,21 +378,64 @@ describe('gameManager', () => {
 
         it('should let the host switch mode from the lobby', () => {
             setupLobby('mode-ok');
-            const result = setGameMode('mode-ok', 'host1', 'CUSTOM_WORD');
+            const result = updateGameOptions('mode-ok', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
             expect(result!.gameMode).toBe('CUSTOM_WORD');
 
-            const back = setGameMode('mode-ok', 'host1', 'CLASSIC');
+            const back = updateGameOptions('mode-ok', 'host1', {
+                gameMode: 'CLASSIC',
+            });
             expect(back!.gameMode).toBe('CLASSIC');
         });
 
-        it('should reject non-hosts, unknown modes and missing rooms', () => {
+        it('should reject non-hosts and missing rooms', () => {
             const room = setupLobby('mode-invalid');
 
-            expect(setGameMode('mode-invalid', 'p2', 'CUSTOM_WORD')).toBeNull();
-            expect(setGameMode('mode-invalid', 'host1', 'NOPE')).toBeNull();
-            expect(setGameMode('mode-invalid', 'host1', undefined)).toBeNull();
-            expect(setGameMode('missing-room', 'host1', 'CLASSIC')).toBeNull();
+            expect(
+                updateGameOptions('mode-invalid', 'p2', {
+                    gameMode: 'CUSTOM_WORD',
+                })
+            ).toBeNull();
+            expect(
+                updateGameOptions('missing-room', 'host1', {
+                    gameMode: 'CLASSIC',
+                })
+            ).toBeNull();
             expect(room.gameMode).toBe('CLASSIC');
+        });
+
+        it('should ignore an unknown mode without dropping the rest of the update', () => {
+            const room = setupLobby('mode-unknown');
+
+            // Same treatment as any other bad field: skipped, not fatal
+            const result = updateGameOptions('mode-unknown', 'host1', {
+                gameMode: 'NOPE',
+                roundTime: 40,
+            });
+
+            expect(result).not.toBeNull();
+            expect(room.gameMode).toBe('CLASSIC');
+            expect(room.gameOptions.roundTime).toBe(40);
+
+            updateGameOptions('mode-unknown', 'host1', { gameMode: undefined });
+            expect(room.gameMode).toBe('CLASSIC');
+        });
+
+        it('should apply the mode before the options it takes over', () => {
+            const room = setupLobby('mode-atomic');
+
+            // The host staged a drawing setting and switched mode in the same
+            // save. The mode wins: it is applied first, then locks the option.
+            const result = updateGameOptions('mode-atomic', 'host1', {
+                gameMode: 'ORIGINAL',
+                roundTime: 40,
+                unlimitedInk: true,
+            });
+
+            expect(result!.gameMode).toBe('ORIGINAL');
+            expect(room.gameOptions.roundTime).toBe(DEFAULT_ROUND_TIME);
+            expect(room.gameOptions.unlimitedInk).toBe(false);
         });
 
         it('should reject mode changes once the game has started', () => {
@@ -394,7 +443,11 @@ describe('gameManager', () => {
             joinRoom('mode-late', createPlayer('p3', 'Charlie'));
             startGame('mode-late', 'host1');
 
-            expect(setGameMode('mode-late', 'host1', 'CUSTOM_WORD')).toBeNull();
+            expect(
+                updateGameOptions('mode-late', 'host1', {
+                    gameMode: 'CUSTOM_WORD',
+                })
+            ).toBeNull();
             expect(room.gameMode).toBe('CLASSIC');
         });
 
@@ -405,13 +458,17 @@ describe('gameManager', () => {
             });
             expect(room.gameOptions.impostorGuessEnabled).toBe(true);
 
-            setGameMode('mode-guess-off', 'host1', 'CUSTOM_WORD');
+            updateGameOptions('mode-guess-off', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
             expect(room.gameOptions.impostorGuessEnabled).toBe(false);
         });
 
         it('should reject enabling the impostor guess while CUSTOM_WORD is selected', () => {
             const room = setupLobby('mode-guess-locked');
-            setGameMode('mode-guess-locked', 'host1', 'CUSTOM_WORD');
+            updateGameOptions('mode-guess-locked', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
 
             const result = updateGameOptions('mode-guess-locked', 'host1', {
                 impostorGuessEnabled: true,
@@ -423,7 +480,9 @@ describe('gameManager', () => {
             expect(result!.gameOptions.roundTime).toBe(40);
 
             // ...and it becomes settable again back in CLASSIC
-            setGameMode('mode-guess-locked', 'host1', 'CLASSIC');
+            updateGameOptions('mode-guess-locked', 'host1', {
+                gameMode: 'CLASSIC',
+            });
             updateGameOptions('mode-guess-locked', 'host1', {
                 impostorGuessEnabled: true,
             });
@@ -433,7 +492,9 @@ describe('gameManager', () => {
         it('should survive playAgain', () => {
             const room = setupLobby('mode-again');
             joinRoom('mode-again', createPlayer('p3', 'Charlie'));
-            setGameMode('mode-again', 'host1', 'CUSTOM_WORD');
+            updateGameOptions('mode-again', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
             startGame('mode-again', 'host1');
 
             playAgain('mode-again', 'host1');
@@ -451,7 +512,7 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom(id, createPlayer(pid, pid))
             );
-            setGameMode(id, 'host1', 'CUSTOM_WORD');
+            updateGameOptions(id, 'host1', { gameMode: 'CUSTOM_WORD' });
             startGame(id, 'host1');
             room.impostorId = impostorId;
             return room;
@@ -585,7 +646,7 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom(id, createPlayer(pid, pid))
             );
-            setGameMode(id, 'host1', 'HOT_WORD');
+            updateGameOptions(id, 'host1', { gameMode: 'HOT_WORD' });
             startGame(id, 'host1');
             room.impostorId = 'host1';
             room.phase = 'RESULTS';
@@ -600,7 +661,7 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom('hot-start', createPlayer(pid, pid))
             );
-            setGameMode('hot-start', 'host1', 'HOT_WORD');
+            updateGameOptions('hot-start', 'host1', { gameMode: 'HOT_WORD' });
 
             const result = startGame('hot-start', 'host1');
             expect(result!.phase).toBe('ROLE_REVEAL');
@@ -732,7 +793,7 @@ describe('gameManager', () => {
             });
             expect(room.gameOptions.clearCanvasEachRound).toBe(false);
 
-            setGameMode('hot-options', 'host1', 'HOT_WORD');
+            updateGameOptions('hot-options', 'host1', { gameMode: 'HOT_WORD' });
             expect(room.gameOptions.clearCanvasEachRound).toBe(true);
 
             const result = updateGameOptions('hot-options', 'host1', {
@@ -744,7 +805,7 @@ describe('gameManager', () => {
             expect(result!.gameOptions.roundTime).toBe(40);
 
             // ...and it becomes settable again back in CLASSIC
-            setGameMode('hot-options', 'host1', 'CLASSIC');
+            updateGameOptions('hot-options', 'host1', { gameMode: 'CLASSIC' });
             updateGameOptions('hot-options', 'host1', {
                 clearCanvasEachRound: false,
             });
@@ -754,12 +815,470 @@ describe('gameManager', () => {
         it('should allow the impostor guess, unlike CUSTOM_WORD', () => {
             const room = createRoom('hot-guess', 'host1');
             joinRoom('hot-guess', createPlayer('host1', 'Host'));
-            setGameMode('hot-guess', 'host1', 'HOT_WORD');
+            updateGameOptions('hot-guess', 'host1', { gameMode: 'HOT_WORD' });
 
             updateGameOptions('hot-guess', 'host1', {
                 impostorGuessEnabled: true,
             });
             expect(room.gameOptions.impostorGuessEnabled).toBe(true);
+        });
+    });
+
+    describe('ORIGINAL mode', () => {
+        const setupGame = (id: string) => {
+            const room = createRoom(id, 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom(id, createPlayer(pid, pid))
+            );
+            updateGameOptions(id, 'host1', { gameMode: 'ORIGINAL' });
+            startGame(id, 'host1');
+            room.impostorId = 'host1';
+            return room;
+        };
+
+        // Everyone has read their role, so the game sits on the order screen.
+        const setupOrderScreen = (id: string) => {
+            const room = setupGame(id);
+            ['host1', 'p2', 'p3'].forEach((pid) => proceedToDrawing(id, pid));
+            return room;
+        };
+
+        it('should start the game exactly like CLASSIC', () => {
+            const room = setupGame('original-start');
+
+            expect(room.phase).toBe('ROLE_REVEAL');
+            expect(room.secretWord).not.toBeNull();
+            expect(room.turnOrder).toHaveLength(3);
+        });
+
+        it('should open the round on ORDER_INFO instead of DRAWING', () => {
+            const room = setupGame('original-role-reveal');
+
+            proceedToDrawing('original-role-reveal', 'host1');
+            proceedToDrawing('original-role-reveal', 'p2');
+            expect(room.phase).toBe('ROLE_REVEAL');
+
+            const result = proceedToDrawing('original-role-reveal', 'p3');
+            expect(result!.phase).toBe('ORDER_INFO');
+        });
+
+        it('should move to VOTING once everyone confirms the order', () => {
+            const room = setupOrderScreen('original-confirm');
+
+            confirmOrder('original-confirm', 'host1');
+            expect(
+                room.players.find((p) => p.id === 'host1')!.hasConfirmedOrder
+            ).toBe(true);
+            expect(room.phase).toBe('ORDER_INFO');
+
+            confirmOrder('original-confirm', 'p2');
+            expect(room.phase).toBe('ORDER_INFO');
+
+            const result = confirmOrder('original-confirm', 'p3');
+            expect(result!.phase).toBe('VOTING');
+        });
+
+        it('should not wait for ejected players', () => {
+            const room = setupOrderScreen('original-ejected');
+            room.players.find((p) => p.id === 'p3')!.isEjected = true;
+
+            // The ejected player cannot confirm either
+            expect(confirmOrder('original-ejected', 'p3')).toBeNull();
+
+            confirmOrder('original-ejected', 'host1');
+            const result = confirmOrder('original-ejected', 'p2');
+            expect(result!.phase).toBe('VOTING');
+        });
+
+        it('should still wait for a disconnected player', () => {
+            const room = setupOrderScreen('original-disconnected');
+
+            leaveRoom('original-disconnected', 'p3');
+            confirmOrder('original-disconnected', 'host1');
+            confirmOrder('original-disconnected', 'p2');
+
+            // Deliberate, like the other reveal screens: the round does not
+            // start behind the back of someone who is reconnecting.
+            expect(room.phase).toBe('ORDER_INFO');
+        });
+
+        it('should reject confirmations from the wrong phase, room or player', () => {
+            expect(confirmOrder('missing-room', 'host1')).toBeNull();
+
+            const room = setupGame('original-guards');
+            expect(confirmOrder('original-guards', 'host1')).toBeNull();
+
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                proceedToDrawing('original-guards', pid)
+            );
+            expect(confirmOrder('original-guards', 'ghost')).toBeNull();
+            expect(room.phase).toBe('ORDER_INFO');
+        });
+
+        it('should start every new round on ORDER_INFO, keeping word and order', () => {
+            const room = setupOrderScreen('original-new-round');
+            const word = room.secretWord;
+            const order = [...room.turnOrder];
+            room.phase = 'RESULTS';
+
+            ['host1', 'p2'].forEach((pid) =>
+                nextRound('original-new-round', pid)
+            );
+            expect(room.phase).toBe('RESULTS');
+
+            const result = nextRound('original-new-round', 'p3');
+
+            expect(result!.phase).toBe('ORDER_INFO');
+            expect(result!.currentRound).toBe(2);
+            // Same word and same order: only the impostor hunt moves on
+            expect(result!.secretWord).toBe(word);
+            expect(result!.turnOrder).toEqual(order);
+            expect(result!.currentTurnPlayerId).toBe(order[0]);
+            expect(room.players.every((p) => !p.hasConfirmedOrder)).toBe(true);
+        });
+
+        it('should redraw the order every round only in RANDOM_ORDER', () => {
+            const room = setupOrderScreen('original-redraw');
+            // Enough players that a redraw landing on the same order by chance
+            // is unlikely to make this flaky (1/720 per round).
+            ['p4', 'p5', 'p6'].forEach((pid) => {
+                room.players.push(createPlayer(pid, pid));
+                room.turnOrder.push(pid);
+            });
+            room.gameOptions.turnOrderMode = 'RANDOM_ORDER';
+            const playerIds = room.players.map((p) => p.id);
+            const firstOrder = [...room.turnOrder];
+
+            const playRound = () => {
+                room.phase = 'RESULTS';
+                room.players.forEach((p) => {
+                    p.hasConfirmedNewRound = false;
+                });
+                playerIds.forEach((pid) => nextRound('original-redraw', pid));
+            };
+
+            playRound();
+            const secondOrder = [...room.turnOrder];
+            playRound();
+            const thirdOrder = [...room.turnOrder];
+
+            // Same players every round, in a different order
+            [secondOrder, thirdOrder].forEach((order) => {
+                expect([...order].sort()).toEqual([...firstOrder].sort());
+            });
+            expect([
+                secondOrder.join() !== firstOrder.join(),
+                thirdOrder.join() !== secondOrder.join(),
+            ]).toContain(true);
+            expect(room.currentTurnPlayerId).toBe(thirdOrder[0]);
+        });
+
+        it('should keep the order across rounds in FIXED_ORDER', () => {
+            const room = setupOrderScreen('original-fixed-order');
+            room.gameOptions.turnOrderMode = 'FIXED_ORDER';
+            const order = [...room.turnOrder];
+
+            for (let round = 0; round < 5; round++) {
+                room.phase = 'RESULTS';
+                room.players.forEach((p) => {
+                    p.hasConfirmedNewRound = false;
+                });
+                ['host1', 'p2', 'p3'].forEach((pid) =>
+                    nextRound('original-fixed-order', pid)
+                );
+                expect(room.turnOrder).toEqual(order);
+            }
+        });
+
+        it('should hand the start to the next in order when the starter is ejected', () => {
+            const room = setupOrderScreen('original-ejected-starter');
+            room.turnOrder = ['p3', 'host1', 'p2'];
+            room.currentTurnPlayerId = 'p3';
+            room.players.find((p) => p.id === 'p3')!.isEjected = true;
+            room.phase = 'RESULTS';
+
+            ['host1', 'p2'].forEach((pid) =>
+                nextRound('original-ejected-starter', pid)
+            );
+
+            expect(room.phase).toBe('ORDER_INFO');
+            expect(room.turnOrder).toEqual(['host1', 'p2']);
+            expect(room.currentTurnPlayerId).toBe('host1');
+        });
+
+        it('should reset every drawing option and lock them', () => {
+            const room = createRoom('original-options', 'host1');
+            joinRoom('original-options', createPlayer('host1', 'Host'));
+            updateGameOptions('original-options', 'host1', {
+                roundTime: 40,
+                unlimitedInk: true,
+                playerColorsEnabled: true,
+                clearCanvasEachRound: false,
+                impostorGuessEnabled: true,
+            });
+
+            updateGameOptions('original-options', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
+            expect(room.gameOptions).toMatchObject({
+                roundTime: DEFAULT_ROUND_TIME,
+                unlimitedInk: false,
+                playerColorsEnabled: false,
+                clearCanvasEachRound: true,
+                impostorGuessEnabled: false,
+            });
+
+            const result = updateGameOptions('original-options', 'host1', {
+                unlimitedInk: true,
+                impostorGuessEnabled: true,
+                hideHint: true,
+            });
+            expect(result!.gameOptions.unlimitedInk).toBe(false);
+            expect(result!.gameOptions.impostorGuessEnabled).toBe(false);
+            // ...while the options this mode does own still apply
+            expect(result!.gameOptions.hideHint).toBe(true);
+        });
+
+        it('should keep turnOrderMode across a detour through another mode', () => {
+            const room = createRoom('original-order-kept', 'host1');
+            joinRoom('original-order-kept', createPlayer('host1', 'Host'));
+            updateGameOptions('original-order-kept', 'host1', {
+                gameMode: 'ORIGINAL',
+                turnOrderMode: 'RANDOM_ORDER',
+            });
+
+            // Deliberately NOT locked like hideHint: the option is only ever
+            // read in a spoken mode, so carrying it is inert rather than
+            // dangerous, and the host keeps the order they chose.
+            updateGameOptions('original-order-kept', 'host1', {
+                gameMode: 'CLASSIC',
+            });
+            expect(room.gameOptions.turnOrderMode).toBe('RANDOM_ORDER');
+
+            updateGameOptions('original-order-kept', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
+            expect(room.gameOptions.turnOrderMode).toBe('RANDOM_ORDER');
+        });
+
+        it('should ignore turnOrderMode outside a spoken mode', () => {
+            const room = createRoom('classic-order-inert', 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom('classic-order-inert', createPlayer(pid, pid))
+            );
+            updateGameOptions('classic-order-inert', 'host1', {
+                turnOrderMode: 'RANDOM_ORDER',
+            });
+            startGame('classic-order-inert', 'host1');
+            const order = [...room.turnOrder];
+            room.phase = 'RESULTS';
+
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                nextRound('classic-order-inert', pid)
+            );
+
+            // CLASSIC never redraws the order, whatever turnOrderMode says
+            expect(room.phase).toBe('DRAWING');
+            expect(room.turnOrder).toEqual(order);
+        });
+
+        it('should force hideHint off in every other mode', () => {
+            const room = createRoom('original-hide-hint', 'host1');
+            joinRoom('original-hide-hint', createPlayer('host1', 'Host'));
+            updateGameOptions('original-hide-hint', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
+            updateGameOptions('original-hide-hint', 'host1', {
+                hideHint: true,
+            });
+            expect(room.gameOptions.hideHint).toBe(true);
+
+            updateGameOptions('original-hide-hint', 'host1', {
+                gameMode: 'CLASSIC',
+            });
+            expect(room.gameOptions.hideHint).toBe(false);
+
+            // A mode whose options screen cannot show it must not keep it on
+            updateGameOptions('original-hide-hint', 'host1', {
+                hideHint: true,
+            });
+            expect(room.gameOptions.hideHint).toBe(false);
+        });
+
+        it('should only accept known turn order modes', () => {
+            const room = createRoom('original-order-mode', 'host1');
+            joinRoom('original-order-mode', createPlayer('host1', 'Host'));
+            updateGameOptions('original-order-mode', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
+            expect(room.gameOptions.turnOrderMode).toBe(
+                DEFAULT_TURN_ORDER_MODE
+            );
+
+            updateGameOptions('original-order-mode', 'host1', {
+                turnOrderMode: 'RANDOM_ORDER',
+            });
+            expect(room.gameOptions.turnOrderMode).toBe('RANDOM_ORDER');
+
+            updateGameOptions('original-order-mode', 'host1', {
+                turnOrderMode: 'DIAGONAL',
+            });
+            expect(room.gameOptions.turnOrderMode).toBe('RANDOM_ORDER');
+        });
+
+        it('should reject the impostor guess even if the option is forced on', () => {
+            const room = setupOrderScreen('original-no-guess');
+            room.phase = 'VOTING';
+            room.gameOptions.impostorGuessEnabled = true;
+
+            expect(
+                submitImpostorGuess(
+                    'original-no-guess',
+                    'host1',
+                    room.secretWord!,
+                    'en'
+                )
+            ).toBeNull();
+            expect(room.gameEnded).toBe(false);
+        });
+    });
+
+    describe('ORIGINAL_CHAOS mode', () => {
+        const setupLobby = (id: string) => {
+            const room = createRoom(id, 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom(id, createPlayer(pid, pid))
+            );
+            updateGameOptions(id, 'host1', { gameMode: 'ORIGINAL_CHAOS' });
+            return room;
+        };
+
+        it('should run WORD_SELECTION -> ROLE_REVEAL -> ORDER_INFO -> VOTING', () => {
+            const room = setupLobby('chaos-flow');
+
+            // Opens on WORD_SELECTION, like CUSTOM_WORD
+            startGame('chaos-flow', 'host1');
+            expect(room.phase).toBe('WORD_SELECTION');
+            expect(room.secretWord).toBeNull();
+
+            room.impostorId = 'host1';
+            submitCustomWord('chaos-flow', 'host1', 'impostorword');
+            submitCustomWord('chaos-flow', 'p2', 'crewmateword');
+            expect(room.phase).toBe('WORD_SELECTION');
+
+            submitCustomWord('chaos-flow', 'p3', 'anotherword');
+            expect(room.phase).toBe('ROLE_REVEAL');
+            // The impostor's own word is never the secret one
+            expect(room.secretWord).not.toBe('impostorword');
+            expect(room.secretCategory).toBe(SPECIAL_CATEGORY);
+
+            // ...and from there it runs as ORIGINAL: no drawing
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                proceedToDrawing('chaos-flow', pid)
+            );
+            expect(room.phase).toBe('ORDER_INFO');
+
+            ['host1', 'p2'].forEach((pid) => confirmOrder('chaos-flow', pid));
+            expect(room.phase).toBe('ORDER_INFO');
+
+            const result = confirmOrder('chaos-flow', 'p3');
+            expect(result!.phase).toBe('VOTING');
+            expect(room.canvasStrokes).toEqual([]);
+        });
+
+        it('should start every new round on ORDER_INFO, keeping the written word', () => {
+            const room = setupLobby('chaos-new-round');
+            startGame('chaos-new-round', 'host1');
+            room.impostorId = 'host1';
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                submitCustomWord('chaos-new-round', pid, `word-${pid}`)
+            );
+            const word = room.secretWord;
+            room.phase = 'RESULTS';
+
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                nextRound('chaos-new-round', pid)
+            );
+
+            expect(room.phase).toBe('ORDER_INFO');
+            expect(room.currentRound).toBe(2);
+            // No new word is drawn: the players wrote this one
+            expect(room.secretWord).toBe(word);
+        });
+
+        it('should redraw the order every round in RANDOM_ORDER, like ORIGINAL', () => {
+            const room = setupLobby('chaos-redraw');
+            ['p4', 'p5', 'p6'].forEach((pid) =>
+                joinRoom('chaos-redraw', createPlayer(pid, pid))
+            );
+            updateGameOptions('chaos-redraw', 'host1', {
+                turnOrderMode: 'RANDOM_ORDER',
+            });
+            startGame('chaos-redraw', 'host1');
+            const playerIds = room.players.map((p) => p.id);
+            playerIds.forEach((pid) =>
+                submitCustomWord('chaos-redraw', pid, `word-${pid}`)
+            );
+            const firstOrder = [...room.turnOrder];
+
+            const playRound = () => {
+                room.phase = 'RESULTS';
+                room.players.forEach((p) => {
+                    p.hasConfirmedNewRound = false;
+                });
+                playerIds.forEach((pid) => nextRound('chaos-redraw', pid));
+            };
+
+            playRound();
+            const secondOrder = [...room.turnOrder];
+            playRound();
+            const thirdOrder = [...room.turnOrder];
+
+            expect([...secondOrder].sort()).toEqual([...firstOrder].sort());
+            expect([
+                secondOrder.join() !== firstOrder.join(),
+                thirdOrder.join() !== secondOrder.join(),
+            ]).toContain(true);
+        });
+
+        it('should lock the drawing options away and keep hideHint settable', () => {
+            const room = setupLobby('chaos-options');
+            updateGameOptions('chaos-options', 'host1', {
+                unlimitedInk: true,
+                impostorGuessEnabled: true,
+                hideHint: true,
+            });
+
+            expect(room.gameOptions).toMatchObject({
+                roundTime: DEFAULT_ROUND_TIME,
+                unlimitedInk: false,
+                playerColorsEnabled: false,
+                clearCanvasEachRound: true,
+                impostorGuessEnabled: false,
+                // The mode owns this one, so it applies
+                hideHint: true,
+            });
+        });
+
+        it('should reject the impostor guess, like both modes it builds on', () => {
+            const room = setupLobby('chaos-no-guess');
+            startGame('chaos-no-guess', 'host1');
+            room.impostorId = 'host1';
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                submitCustomWord('chaos-no-guess', pid, `word-${pid}`)
+            );
+            room.phase = 'VOTING';
+            room.gameOptions.impostorGuessEnabled = true;
+
+            expect(
+                submitImpostorGuess(
+                    'chaos-no-guess',
+                    'host1',
+                    room.secretWord!,
+                    'en'
+                )
+            ).toBeNull();
+            expect(room.gameEnded).toBe(false);
         });
     });
 
@@ -1690,6 +2209,8 @@ describe('gameManager', () => {
                 playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
+                hideHint: false,
+                turnOrderMode: DEFAULT_TURN_ORDER_MODE,
             });
         });
 
@@ -1716,6 +2237,8 @@ describe('gameManager', () => {
                 playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
+                hideHint: false,
+                turnOrderMode: DEFAULT_TURN_ORDER_MODE,
             });
         });
 
@@ -1737,6 +2260,8 @@ describe('gameManager', () => {
                 playerColorsEnabled: false,
                 impostorGuessEnabled: false,
                 impostorGuessAttempts: 3,
+                hideHint: false,
+                turnOrderMode: DEFAULT_TURN_ORDER_MODE,
             });
             expect('unexpected' in result!.gameOptions).toBe(false);
         });
