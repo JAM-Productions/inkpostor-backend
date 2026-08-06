@@ -38,15 +38,20 @@ in the client:
 
 | Mode | Locked option | Why |
 |---|---|---|
-| `CUSTOM_WORD` | `impostorGuessEnabled: false` | The word is written by a player, so it could simply be handed to the impostor. |
+| `CUSTOM_WORD` | `impostorGuessEnabled: false` (and its sub-options, back to default) | The word is written by a player, so it could simply be handed to the impostor. |
 | `HOT_WORD` | `clearCanvasEachRound: true` | Every round has a new word, so keeping the previous drawing makes no sense. |
-| `ORIGINAL`, `ORIGINAL_CHAOS` | every drawing option, back to its default | Nothing is drawn, so `roundTime`, `unlimitedInk`, `playerColorsEnabled`, `clearCanvasEachRound`, `impostorGuessEnabled` and `impostorGuessAttempts` are all reset instead of lingering as settings the host cannot see. |
-| every non-spoken mode | `hideHint: false` | `hideHint` is a spoken-mode-only option. Left on, it would keep the category from the impostor in a mode whose options screen cannot even turn it back off. |
+| `ORIGINAL`, `ORIGINAL_CHAOS` | every drawing option | Nothing is drawn, so `roundTime`, `unlimitedInk`, `playerColorsEnabled`, `clearCanvasEachRound`, `impostorGuessEnabled` (with its sub-options) and `impostorGuessAttempts` are all forced to a neutral value instead of lingering as settings the host cannot see. |
 
-Switching back to a mode without the lock leaves the forced value in place; the
-host can then change it again. A spoken mode locks the drawing options *away* rather
-than showing them with a padlock: the client hides those sections entirely and
-renders the mode's own two instead (`hideHint`, `turnOrderMode`).
+The lock **masks** the value, it does not consume it. The room keeps the two side
+by side: `hostGameOptions` is what the host picked and `gameOptions` is that with
+the current mode's locks applied on top — the only one the rules ever read. So a
+detour through a mode that owns an option hands the value back untouched the
+moment the host picks a mode that leaves it alone, and the options modal edits
+(and saves) `hostGameOptions` for the same reason.
+
+A spoken mode locks the drawing options *away* rather than showing them with a
+padlock: the client hides those sections entirely and renders `turnOrderMode`
+instead. `hideHint` is available in **every** mode.
 
 ## Game Phases
 
@@ -59,7 +64,7 @@ renders the mode's own two instead (`hideHint`, `turnOrderMode`).
 | `ORDER_INFO` | Spoken modes only. Announces who opens the round and in which direction, then every player confirms. Replaces `DRAWING` as the start of the round. |
 | `DRAWING` | Players take turns drawing on the canvas. Vote-kick is available. |
 | `VOTING` | All players vote on who they think the Inkpostor is (or skip). |
-| `IMPOSTOR_GUESS` | The ejected Inkpostor gets one final guess at the secret word. Everyone else waits. Only reached when the impostor-guess option is enabled. |
+| `IMPOSTOR_GUESS` | The ejected Inkpostor gets one final guess at the secret word. Everyone else waits. Only reached when the impostor-guess option is on and the Inkpostor still has an attempt left. |
 | `RESULTS` | The round or game result is revealed. |
 
 ---
@@ -76,9 +81,11 @@ ORDER_INFO → VOTING          (all non-ejected players confirm they have read t
 DRAWING → VOTING             (all turns used up, or emergency voting triggered)
 DRAWING → RESULTS            (vote-kick causes game-ending condition)
 DRAWING → RESULTS            (impostor guesses the word correctly — impostor wins)
-VOTING → RESULTS             (voting ends and the impostor is NOT ejected, or the guess option is off)
+DRAWING → RESULTS            (impostor spends a lethal guess pool — impostor loses)
+VOTING → RESULTS             (voting ends and the impostor is NOT ejected, or they have no guess left)
 VOTING → RESULTS             (impostor guesses the word correctly — impostor wins)
-VOTING → IMPOSTOR_GUESS      (impostor ejected by vote AND the impostor-guess option is enabled)
+VOTING → RESULTS             (impostor spends a lethal guess pool — impostor loses)
+VOTING → IMPOSTOR_GUESS      (impostor ejected by vote AND they still have a guess left)
 IMPOSTOR_GUESS → RESULTS     (impostor submits their final guess, or skips it)
 RESULTS → DRAWING            (next round, all connected non-ejected players confirm)
 RESULTS → WORD_REVEAL        (same, in HOT_WORD mode — a new word is drawn)
@@ -132,7 +139,7 @@ RESULTS → ORDER_INFO                (same, in a spoken mode)
 
 | Condition | Outcome |
 |---|---|
-| Inkpostor ejected via voting (`ejectedId === impostorId`) | 🟢 **Crewmates win** — Inkpostor Defeated *(unless the guess option is on → first goes to `IMPOSTOR_GUESS`)* |
+| Inkpostor ejected via voting (`ejectedId === impostorId`) | 🟢 **Crewmates win** — Inkpostor Defeated *(unless they still hold a guess → first goes to `IMPOSTOR_GUESS`)* |
 | Inkpostor ejected via vote-kick (`ejectedId === impostorId`) | 🟢 **Crewmates win** — Inkpostor Defeated |
 | Crewmate kicked, impostor still active, connected players < 3 | 🔴 **Inkpostor wins** |
 | Crewmate kicked, impostor disconnected / not in game, connected players < 3 | 🟢 **Crewmates win** — impostor abandoned |
@@ -140,6 +147,7 @@ RESULTS → ORDER_INFO                (same, in a spoken mode)
 | Voting ends in a tie or everyone skips | ➡ Next round (`ejectedId = null`) |
 | Inkpostor guesses the secret word (any phase: DRAWING / VOTING / IMPOSTOR_GUESS) | 🔴 **Inkpostor wins** (`impostorGuessedCorrectly = true`) |
 | Inkpostor ejected, then fails or skips their final guess | 🟢 **Crewmates win** — Inkpostor Defeated |
+| Inkpostor spends the whole guess pool while `impostorLosesWhenOutOfGuesses` is on | 🟢 **Crewmates win** — Inkpostor Defeated (`impostorOutOfGuesses = true`, no ejection involved) |
 | Inkpostor disconnects while ejected and owing a final guess (in `IMPOSTOR_GUESS`, or a `VOTING` resolution that would enter it) | 🟢 **Crewmates win** — counts as a surrender (`ejectedId === impostorId`) |
 
 > **Active player** = `isConnected && !isEjected`
@@ -257,25 +265,34 @@ the ejected players are dropped, so they never come back). In the other two the
 same player opens every round. When that starter is ejected, the filter alone
 hands the start to the next player in the order.
 
-**Hiding the hint (`hideHint`)**
+---
+
+## Hiding the Hint (`hideHint`, optional feature)
 
 Turns the category off **for the impostor only**, so they walk in completely
-blind. It is enforced on the server in two places, because the category travels
-in two payloads: `roleAssignment` and the broadcast state (where it is *not*
-sanitised, unlike `secretWord`). Both are stripped for the impostor's socket
-until `RESULTS`, where everything is revealed.
+blind. Available in every mode (in the player-word modes the category is the
+generic `Special`, so hiding it gives little away). It is enforced on the server
+in two places, because the category travels in two payloads: `roleAssignment`
+and the broadcast state (where it is *not* sanitised, unlike `secretWord`). Both
+are stripped for the impostor's socket until `RESULTS`, where everything is
+revealed.
 
 ---
 
 ## Impostor Guess (optional feature)
 
 Lets the Inkpostor win by guessing the secret word. Configured by the host in the
-lobby, and only available in `CLASSIC` mode (see Custom Word Mode above):
+lobby, and only available in the drawing modes that don't hand the word to the
+players (see Custom Word Mode above):
 
 | Option | Default | Range | Meaning |
 |---|---|---|---|
-| `impostorGuessEnabled` | `false` | boolean | Turns the whole feature on/off |
-| `impostorGuessAttempts` | `3` | `1`–`3` | Size of the shared in-phase guess pool |
+| `impostorGuessEnabled` | `true` | boolean | Turns the whole feature on/off |
+| `impostorGuessAttempts` | `1` | `1`–`3` | Size of the shared in-phase guess pool |
+| `impostorLosesWhenOutOfGuesses` | `false` | boolean | Spending the whole pool loses the game on the spot |
+
+> The last one is a sub-option of `impostorGuessEnabled`: it goes back to default
+> whenever guessing is off (by the host or by the mode).
 
 **In-phase guesses (`DRAWING` / `VOTING`)**
 
@@ -283,11 +300,12 @@ lobby, and only available in `CLASSIC` mode (see Custom Word Mode above):
 - The pool **persists across rounds** within the same game; it is reset only on `startGame` / `playAgain`.
 - A correct guess ends the game immediately → `RESULTS`, `impostorGuessedCorrectly = true` (🔴 Inkpostor wins).
 - A wrong in-phase guess consumes one attempt and is broadcast **only to the impostor's socket** (so crewmates don't learn that guessing is happening).
+- Unless the pool is lethal: the wrong guess that empties it ends the game → `RESULTS`, `impostorOutOfGuesses = true` (🟢 Crewmates win), which is broadcast to everyone.
 
 **Final guess (`IMPOSTOR_GUESS` phase)**
 
-- When the impostor is ejected by vote and the feature is on, voting resolves into `IMPOSTOR_GUESS` instead of `RESULTS`.
-- The impostor gets **one** final guess (independent of the in-phase pool) plus a **skip** option. Everyone else sees a waiting screen.
+- When the impostor is ejected by vote **and the pool still has an attempt left** (`hasGuessesLeft`), voting resolves into `IMPOSTOR_GUESS` instead of `RESULTS`. An impostor who already spent every attempt gets no last chance: the vote resolves straight to `RESULTS`.
+- The impostor gets **one** final guess plus a **skip** option. Everyone else sees a waiting screen. It is the pool being cashed in, so it is not bounded again inside the phase and does not increment `impostorGuessesUsed`.
 - Correct → 🔴 Inkpostor wins. Wrong or skipped → 🟢 Crewmates win (`ejectedId` already = `impostorId`).
 
 **Validation (server-side, language-aware)**

@@ -26,6 +26,8 @@ import {
 import { Player, StrokeData } from '../types';
 import {
     ALLOWED_ROUND_TIMES,
+    DEFAULT_GAME_OPTIONS,
+    DEFAULT_IMPOSTOR_GUESSES,
     DEFAULT_ROUND_TIME,
     DEFAULT_TURN_ORDER_MODE,
     MAX_IMPOSTOR_GUESSES,
@@ -55,9 +57,10 @@ describe('gameManager', () => {
                 roundTime: DEFAULT_ROUND_TIME,
                 unlimitedInk: false,
                 clearCanvasEachRound: true,
-                playerColorsEnabled: false,
-                impostorGuessEnabled: false,
-                impostorGuessAttempts: 3,
+                playerColorsEnabled: true,
+                impostorGuessEnabled: true,
+                impostorGuessAttempts: 1,
+                impostorLosesWhenOutOfGuesses: false,
                 hideHint: false,
                 turnOrderMode: DEFAULT_TURN_ORDER_MODE,
             });
@@ -1039,6 +1042,49 @@ describe('gameManager', () => {
             expect(result!.gameOptions.hideHint).toBe(true);
         });
 
+        it('should give the drawing options back when the detour ends', () => {
+            const room = createRoom('original-detour', 'host1');
+            joinRoom('original-detour', createPlayer('host1', 'Host'));
+            updateGameOptions('original-detour', 'host1', {
+                roundTime: 40,
+                unlimitedInk: true,
+                playerColorsEnabled: false,
+                impostorGuessEnabled: false,
+            });
+
+            // A mode that owns them masks them...
+            updateGameOptions('original-detour', 'host1', {
+                gameMode: 'ORIGINAL',
+                hideHint: true,
+            });
+            expect(room.gameOptions).toMatchObject({
+                roundTime: DEFAULT_ROUND_TIME,
+                unlimitedInk: false,
+                playerColorsEnabled: false,
+                impostorGuessEnabled: false,
+            });
+            // ...without touching what the host actually chose
+            expect(room.hostGameOptions).toMatchObject({
+                roundTime: 40,
+                unlimitedInk: true,
+                playerColorsEnabled: false,
+                impostorGuessEnabled: false,
+            });
+
+            updateGameOptions('original-detour', 'host1', {
+                gameMode: 'CLASSIC',
+            });
+
+            // ...so leaving the mode hands the host their settings back
+            expect(room.gameOptions).toMatchObject({
+                roundTime: 40,
+                unlimitedInk: true,
+                playerColorsEnabled: false,
+                impostorGuessEnabled: false,
+                hideHint: true,
+            });
+        });
+
         it('should keep turnOrderMode across a detour through another mode', () => {
             const room = createRoom('original-order-kept', 'host1');
             joinRoom('original-order-kept', createPlayer('host1', 'Host'));
@@ -1047,9 +1093,9 @@ describe('gameManager', () => {
                 turnOrderMode: 'RANDOM_ORDER',
             });
 
-            // Deliberately NOT locked like hideHint: the option is only ever
-            // read in a spoken mode, so carrying it is inert rather than
-            // dangerous, and the host keeps the order they chose.
+            // No mode takes this one over, so it isn't even masked on the way
+            // out: it is only ever read in a spoken mode, where carrying it is
+            // inert, and the host keeps the order they chose.
             updateGameOptions('original-order-kept', 'host1', {
                 gameMode: 'CLASSIC',
             });
@@ -1082,7 +1128,7 @@ describe('gameManager', () => {
             expect(room.turnOrder).toEqual(order);
         });
 
-        it('should force hideHint off in every other mode', () => {
+        it('should keep hideHint settable in every mode', () => {
             const room = createRoom('original-hide-hint', 'host1');
             joinRoom('original-hide-hint', createPlayer('host1', 'Host'));
             updateGameOptions('original-hide-hint', 'host1', {
@@ -1093,16 +1139,21 @@ describe('gameManager', () => {
             });
             expect(room.gameOptions.hideHint).toBe(true);
 
+            // No mode takes the hint over, so it survives the switch...
             updateGameOptions('original-hide-hint', 'host1', {
                 gameMode: 'CLASSIC',
             });
-            expect(room.gameOptions.hideHint).toBe(false);
+            expect(room.gameOptions.hideHint).toBe(true);
 
-            // A mode whose options screen cannot show it must not keep it on
+            // ...and stays settable there
+            updateGameOptions('original-hide-hint', 'host1', {
+                hideHint: false,
+            });
+            expect(room.gameOptions.hideHint).toBe(false);
             updateGameOptions('original-hide-hint', 'host1', {
                 hideHint: true,
             });
-            expect(room.gameOptions.hideHint).toBe(false);
+            expect(room.gameOptions.hideHint).toBe(true);
         });
 
         it('should only accept known turn order modes', () => {
@@ -2203,14 +2254,10 @@ describe('gameManager', () => {
 
             expect(result).toBe(room);
             expect(result!.gameOptions).toEqual({
+                ...DEFAULT_GAME_OPTIONS,
                 roundTime: 40,
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
-                playerColorsEnabled: false,
-                impostorGuessEnabled: false,
-                impostorGuessAttempts: 3,
-                hideHint: false,
-                turnOrderMode: DEFAULT_TURN_ORDER_MODE,
             });
         });
 
@@ -2231,14 +2278,10 @@ describe('gameManager', () => {
 
             expect(result).not.toBeNull();
             expect(result!.gameOptions).toEqual({
+                ...DEFAULT_GAME_OPTIONS,
                 roundTime: 35,
                 unlimitedInk: true,
                 clearCanvasEachRound: true,
-                playerColorsEnabled: false,
-                impostorGuessEnabled: false,
-                impostorGuessAttempts: 3,
-                hideHint: false,
-                turnOrderMode: DEFAULT_TURN_ORDER_MODE,
             });
         });
 
@@ -2254,36 +2297,30 @@ describe('gameManager', () => {
 
             expect(result).not.toBeNull();
             expect(result!.gameOptions).toEqual({
-                roundTime: DEFAULT_ROUND_TIME,
+                ...DEFAULT_GAME_OPTIONS,
                 unlimitedInk: true,
-                clearCanvasEachRound: true,
-                playerColorsEnabled: false,
-                impostorGuessEnabled: false,
-                impostorGuessAttempts: 3,
-                hideHint: false,
-                turnOrderMode: DEFAULT_TURN_ORDER_MODE,
             });
             expect('unexpected' in result!.gameOptions).toBe(false);
         });
 
-        it('should toggle playerColorsEnabled, which defaults to off', () => {
+        it('should toggle playerColorsEnabled, which defaults to on', () => {
             const room = createRoom('room-options-player-colors', 'host1');
+            expect(room.gameOptions.playerColorsEnabled).toBe(true);
+
+            updateGameOptions('room-options-player-colors', 'host1', {
+                playerColorsEnabled: false,
+            });
+            expect(room.gameOptions.playerColorsEnabled).toBe(false);
+
+            updateGameOptions('room-options-player-colors', 'host1', {
+                playerColorsEnabled: 'nope',
+            });
             expect(room.gameOptions.playerColorsEnabled).toBe(false);
 
             updateGameOptions('room-options-player-colors', 'host1', {
                 playerColorsEnabled: true,
             });
             expect(room.gameOptions.playerColorsEnabled).toBe(true);
-
-            updateGameOptions('room-options-player-colors', 'host1', {
-                playerColorsEnabled: 'nope',
-            });
-            expect(room.gameOptions.playerColorsEnabled).toBe(true);
-
-            updateGameOptions('room-options-player-colors', 'host1', {
-                playerColorsEnabled: false,
-            });
-            expect(room.gameOptions.playerColorsEnabled).toBe(false);
         });
 
         it('should only accept configured roundTime values', () => {
@@ -2326,6 +2363,49 @@ describe('gameManager', () => {
             expect(result!.gameOptions.impostorGuessEnabled).toBe(true);
         });
 
+        it('should let the host make the guess pool lethal', () => {
+            const room = createRoom('room-options-guess-lethal', 'host1');
+            expect(room.gameOptions.impostorLosesWhenOutOfGuesses).toBe(false);
+
+            updateGameOptions('room-options-guess-lethal', 'host1', {
+                impostorLosesWhenOutOfGuesses: true,
+            });
+            expect(room.gameOptions.impostorLosesWhenOutOfGuesses).toBe(true);
+
+            updateGameOptions('room-options-guess-lethal', 'host1', {
+                impostorLosesWhenOutOfGuesses: 'nope',
+            });
+            expect(room.gameOptions.impostorLosesWhenOutOfGuesses).toBe(true);
+        });
+
+        it('should reset the guessing sub-option when guessing is turned off', () => {
+            const room = createRoom('room-options-guess-off', 'host1');
+            updateGameOptions('room-options-guess-off', 'host1', {
+                impostorLosesWhenOutOfGuesses: true,
+            });
+
+            updateGameOptions('room-options-guess-off', 'host1', {
+                impostorGuessEnabled: false,
+            });
+
+            // It means nothing without the feature, so it doesn't linger
+            expect(room.gameOptions.impostorLosesWhenOutOfGuesses).toBe(false);
+        });
+
+        it('should reset the guessing sub-option in a mode that forbids guessing', () => {
+            const room = createRoom('room-options-guess-mode', 'host1');
+            updateGameOptions('room-options-guess-mode', 'host1', {
+                impostorLosesWhenOutOfGuesses: true,
+            });
+
+            updateGameOptions('room-options-guess-mode', 'host1', {
+                gameMode: 'CUSTOM_WORD',
+            });
+
+            expect(room.gameOptions.impostorGuessEnabled).toBe(false);
+            expect(room.gameOptions.impostorLosesWhenOutOfGuesses).toBe(false);
+        });
+
         it('should clamp impostorGuessAttempts to [1, 3] and round it', () => {
             createRoom('room-options-attempts', 'host1');
             const update = (value: unknown) =>
@@ -2350,8 +2430,10 @@ describe('gameManager', () => {
                 { impostorGuessAttempts: 'lots' }
             );
 
-            // Falls back to the default (3) rather than corrupting the value.
-            expect(result!.gameOptions.impostorGuessAttempts).toBe(3);
+            // Falls back to the default rather than corrupting the value.
+            expect(result!.gameOptions.impostorGuessAttempts).toBe(
+                DEFAULT_IMPOSTOR_GUESSES
+            );
         });
 
         it('should reject non-object payloads', () => {
@@ -2402,8 +2484,28 @@ describe('gameManager', () => {
             room.secretWord = word;
             room.secretCategory = 'Animals';
             room.gameOptions.impostorGuessEnabled = true;
+            // Spelled out rather than left to the default: these cases are about
+            // the pool itself, so its size must not move with the default.
+            room.gameOptions.impostorGuessAttempts = MAX_IMPOSTOR_GUESSES;
             room.phase = 'DRAWING';
             return room;
+        };
+
+        // Same room, one step earlier: sitting in VOTING with the votes still to
+        // be cast, so the ejection rules can be driven through castVote.
+        const setupEjectionRoom = (id: string) => {
+            const room = setupGuessRoom(id);
+            room.phase = 'VOTING';
+            room.players = ['imp', 'p2', 'p3'].map((pid) =>
+                createPlayer(pid, pid)
+            );
+            return room;
+        };
+
+        const ejectImpostor = (id: string) => {
+            castVote(id, 'p2', 'imp');
+            castVote(id, 'p3', 'imp');
+            castVote(id, 'imp', 'p2');
         };
 
         it('should accept the correct word in English', () => {
@@ -2592,25 +2694,115 @@ describe('gameManager', () => {
         });
 
         it('should move the ejected impostor into the IMPOSTOR_GUESS phase', () => {
-            const room = createRoom('guess-eject-phase', 'host1');
-            room.impostorId = 'imp';
-            room.secretWord = 'Dog';
-            room.gameOptions.impostorGuessEnabled = true;
-            room.phase = 'VOTING';
-            room.players = ['imp', 'p2', 'p3'].map((id) => ({
-                id,
-                name: id,
-                isConnected: true,
-                score: 0,
-                hasStartedEmergencyVoting: false,
-            }));
-            // Majority votes the impostor out.
-            castVote('guess-eject-phase', 'p2', 'imp');
-            castVote('guess-eject-phase', 'p3', 'imp');
-            castVote('guess-eject-phase', 'imp', 'p2');
+            const room = setupEjectionRoom('guess-eject-phase');
+            // One attempt spent, two still on the counter
+            room.impostorGuessesUsed = 1;
+
+            ejectImpostor('guess-eject-phase');
+
             expect(room.phase).toBe('IMPOSTOR_GUESS');
             expect(room.gameEnded).toBe(false);
             expect(room.ejectedId).toBe('imp');
+        });
+
+        it('should skip the final guess when the pool is already spent', () => {
+            const room = setupEjectionRoom('guess-eject-spent');
+            room.impostorGuessesUsed = room.gameOptions.impostorGuessAttempts;
+
+            ejectImpostor('guess-eject-spent');
+
+            // Nothing left to spend: being caught ends it right there.
+            expect(room.phase).toBe('RESULTS');
+            expect(room.gameEnded).toBe(true);
+            expect(room.impostorGuessedCorrectly).toBe(false);
+        });
+
+        it('should skip the final guess when guessing is off altogether', () => {
+            const room = setupEjectionRoom('guess-eject-disabled');
+            room.gameOptions.impostorGuessEnabled = false;
+
+            ejectImpostor('guess-eject-disabled');
+
+            expect(room.phase).toBe('RESULTS');
+            expect(room.gameEnded).toBe(true);
+        });
+
+        it('should end the game when a lethal pool runs out', () => {
+            const room = setupGuessRoom('guess-lethal-pool');
+            room.gameOptions.impostorGuessAttempts = 2;
+            room.gameOptions.impostorLosesWhenOutOfGuesses = true;
+
+            const first = submitImpostorGuess(
+                'guess-lethal-pool',
+                'imp',
+                'Cat',
+                'en'
+            );
+            // One attempt left, so the round carries on as usual.
+            expect(first!.phase).toBe('DRAWING');
+            expect(first!.gameEnded).toBe(false);
+            expect(room.impostorOutOfGuesses).toBe(false);
+
+            const last = submitImpostorGuess(
+                'guess-lethal-pool',
+                'imp',
+                'Cat',
+                'en'
+            );
+
+            expect(last!.impostorOutOfGuesses).toBe(true);
+            expect(last!.phase).toBe('RESULTS');
+            expect(last!.gameEnded).toBe(true);
+            expect(last!.impostorGuessedCorrectly).toBe(false);
+        });
+
+        it('should keep playing on an exhausted pool when it is not lethal', () => {
+            const room = setupGuessRoom('guess-harmless-pool');
+            room.gameOptions.impostorGuessAttempts = 1;
+
+            const result = submitImpostorGuess(
+                'guess-harmless-pool',
+                'imp',
+                'Cat',
+                'en'
+            );
+
+            expect(result!.phase).toBe('DRAWING');
+            expect(result!.gameEnded).toBe(false);
+            expect(room.impostorOutOfGuesses).toBe(false);
+        });
+
+        it('should not end the game on a correct last guess of a lethal pool', () => {
+            const room = setupGuessRoom('guess-lethal-win');
+            room.gameOptions.impostorGuessAttempts = 1;
+            room.gameOptions.impostorLosesWhenOutOfGuesses = true;
+
+            const result = submitImpostorGuess(
+                'guess-lethal-win',
+                'imp',
+                'Dog',
+                'en'
+            );
+
+            // Spending the last attempt on the right word still wins.
+            expect(result!.impostorGuessedCorrectly).toBe(true);
+            expect(result!.gameEnded).toBe(true);
+            expect(room.impostorOutOfGuesses).toBe(false);
+        });
+
+        it('should clear impostorOutOfGuesses on a new game', () => {
+            const room = createRoom('guess-lethal-reset', 'host1');
+            ['imp', 'p2', 'p3'].forEach((id) =>
+                joinRoom('guess-lethal-reset', createPlayer(id, id))
+            );
+            room.impostorOutOfGuesses = true;
+
+            playAgain('guess-lethal-reset', 'host1');
+            expect(room.impostorOutOfGuesses).toBe(false);
+
+            room.impostorOutOfGuesses = true;
+            startGame('guess-lethal-reset', 'host1');
+            expect(room.impostorOutOfGuesses).toBe(false);
         });
     });
 });

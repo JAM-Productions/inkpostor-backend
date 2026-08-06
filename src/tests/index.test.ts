@@ -16,6 +16,7 @@ import {
     Player,
     GameOptions,
 } from '../types';
+import { DEFAULT_GAME_OPTIONS } from '../constants';
 import { AddressInfo } from 'net';
 
 describe('Server API and Socket Integration Tests', () => {
@@ -595,9 +596,10 @@ describe('Server API and Socket Integration Tests', () => {
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
                 playerColorsEnabled: true,
-                impostorGuessEnabled: false,
+                impostorGuessEnabled: true,
                 impostorGuessAttempts: 3,
-                hideHint: false,
+                impostorLosesWhenOutOfGuesses: true,
+                hideHint: true,
                 turnOrderMode: 'RANDOM_STARTER',
             };
 
@@ -668,14 +670,8 @@ describe('Server API and Socket Integration Tests', () => {
             ]);
 
             expect(hostState.gameOptions).toEqual({
-                roundTime: 20,
+                ...DEFAULT_GAME_OPTIONS,
                 unlimitedInk: true,
-                clearCanvasEachRound: true,
-                playerColorsEnabled: false,
-                impostorGuessEnabled: false,
-                impostorGuessAttempts: 3,
-                hideHint: false,
-                turnOrderMode: 'RANDOM_STARTER',
             });
             expect(playerState.gameOptions).toEqual(hostState.gameOptions);
 

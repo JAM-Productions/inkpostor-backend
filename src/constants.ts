@@ -5,7 +5,7 @@ export const DEFAULT_ROUND_TIME = 20;
 export const ALLOWED_ROUND_TIMES = [20, 25, 30, 35, 40] as const;
 export const MIN_IMPOSTOR_GUESSES = 1;
 export const MAX_IMPOSTOR_GUESSES = 3;
-export const DEFAULT_IMPOSTOR_GUESSES = 3;
+export const DEFAULT_IMPOSTOR_GUESSES = 1;
 export const GAME_MODES = [
     'CLASSIC',
     'CUSTOM_WORD',
@@ -38,15 +38,35 @@ export const TURN_ORDER_MODES = [
     'RANDOM_ORDER',
 ] as const;
 export const DEFAULT_TURN_ORDER_MODE: TurnOrderMode = 'RANDOM_STARTER';
+
+// The options a fresh room starts with. Also what every "back to default" rule
+// below reads from, so the two cannot drift apart.
+export const DEFAULT_GAME_OPTIONS: GameOptions = {
+    roundTime: DEFAULT_ROUND_TIME,
+    unlimitedInk: false,
+    clearCanvasEachRound: true,
+    playerColorsEnabled: true,
+    impostorGuessEnabled: true,
+    impostorGuessAttempts: DEFAULT_IMPOSTOR_GUESSES,
+    impostorLosesWhenOutOfGuesses: false,
+    hideHint: false,
+    turnOrderMode: DEFAULT_TURN_ORDER_MODE,
+};
+
+// The guessing sub-option means nothing while the feature itself is off, so
+// wherever guessing is turned off it goes back to default rather than lingering
+// as a setting the host cannot see.
+const GUESS_SUB_OPTION_DEFAULTS: Partial<GameOptions> = {
+    impostorLosesWhenOutOfGuesses:
+        DEFAULT_GAME_OPTIONS.impostorLosesWhenOutOfGuesses,
+};
+
 // Options a mode takes over: while it is selected the value is forced and the
 // host cannot change it. Single source of truth for the lock, mirrored by the
 // options modal in the client.
 //
-// The ORIGINAL-only options are locked off everywhere else on purpose: a
-// `hideHint` left over from an ORIGINAL game would otherwise keep the category
-// from the impostor in a mode whose options screen cannot even turn it back on.
-// Nothing is drawn in a spoken mode, so every drawing option goes back to its
-// default instead of lingering as a setting the host cannot see.
+// Nothing is drawn in a spoken mode, so every drawing option is forced to a
+// neutral value instead of lingering as a setting the host cannot see.
 const SPOKEN_MODE_LOCKS: Partial<GameOptions> = {
     roundTime: DEFAULT_ROUND_TIME,
     unlimitedInk: false,
@@ -54,17 +74,21 @@ const SPOKEN_MODE_LOCKS: Partial<GameOptions> = {
     playerColorsEnabled: false,
     impostorGuessEnabled: false,
     impostorGuessAttempts: DEFAULT_IMPOSTOR_GUESSES,
+    ...GUESS_SUB_OPTION_DEFAULTS,
 };
 
 export const MODE_LOCKED_OPTIONS: Record<
     (typeof GAME_MODES)[number],
     Partial<GameOptions>
 > = {
-    CLASSIC: { hideHint: false },
+    CLASSIC: {},
     // The word is written by a player, so it could simply be handed to the impostor.
-    CUSTOM_WORD: { impostorGuessEnabled: false, hideHint: false },
+    CUSTOM_WORD: {
+        impostorGuessEnabled: false,
+        ...GUESS_SUB_OPTION_DEFAULTS,
+    },
     // Every round has a new word, so keeping the previous drawing makes no sense.
-    HOT_WORD: { clearCanvasEachRound: true, hideHint: false },
+    HOT_WORD: { clearCanvasEachRound: true },
     ORIGINAL: SPOKEN_MODE_LOCKS,
     ORIGINAL_CHAOS: SPOKEN_MODE_LOCKS,
 };
