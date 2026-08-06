@@ -11,9 +11,7 @@ import wordTranslations from './wordTranslations.json';
 import {
     ALLOWED_ROUND_TIMES,
     DEFAULT_GAME_MODE,
-    DEFAULT_IMPOSTOR_GUESSES,
-    DEFAULT_ROUND_TIME,
-    DEFAULT_TURN_ORDER_MODE,
+    DEFAULT_GAME_OPTIONS,
     GAME_MODES,
     isPlayerWordMode,
     isSpokenMode,
@@ -43,10 +41,12 @@ function applyModeLockedOptions(
     return { ...options, ...MODE_LOCKED_OPTIONS[gameMode] };
 }
 
+// Reads the host's payload into their stored choices. Mode locks are NOT applied
+// here: what the host picked is kept as picked, and the locks are layered on top
+// when the effective options are derived (see updateGameOptions).
 function sanitizeGameOptionsUpdate(
     options: unknown,
-    currentOptions: GameOptions,
-    gameMode: GameMode
+    currentOptions: GameOptions
 ): GameOptions | null {
     if (!isPlainObject(options)) return null;
 
@@ -87,6 +87,10 @@ function sanitizeGameOptionsUpdate(
             Math.max(MIN_IMPOSTOR_GUESSES, rounded)
         );
     }
+    if (typeof options.impostorLosesWhenOutOfGuesses === 'boolean') {
+        nextOptions.impostorLosesWhenOutOfGuesses =
+            options.impostorLosesWhenOutOfGuesses;
+    }
     if (typeof options.hideHint === 'boolean') {
         nextOptions.hideHint = options.hideHint;
     }
@@ -94,7 +98,12 @@ function sanitizeGameOptionsUpdate(
         nextOptions.turnOrderMode = options.turnOrderMode as TurnOrderMode;
     }
 
-    return applyModeLockedOptions(nextOptions, gameMode);
+    if (!nextOptions.impostorGuessEnabled) {
+        nextOptions.impostorLosesWhenOutOfGuesses =
+            DEFAULT_GAME_OPTIONS.impostorLosesWhenOutOfGuesses;
+    }
+
+    return nextOptions;
 }
 
 export function createRoom(roomId: string, hostId: string): GameRoom {
@@ -116,20 +125,13 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         currentRound: 1,
         ejectedId: null,
         gameEnded: false,
-        gameOptions: {
-            roundTime: DEFAULT_ROUND_TIME,
-            unlimitedInk: false,
-            clearCanvasEachRound: true,
-            playerColorsEnabled: false,
-            impostorGuessEnabled: false,
-            impostorGuessAttempts: DEFAULT_IMPOSTOR_GUESSES,
-            hideHint: false,
-            turnOrderMode: DEFAULT_TURN_ORDER_MODE,
-        },
+        gameOptions: { ...DEFAULT_GAME_OPTIONS },
+        hostGameOptions: { ...DEFAULT_GAME_OPTIONS },
         gameMode: DEFAULT_GAME_MODE,
         usedWords: [],
         impostorGuessesUsed: 0,
         impostorGuessedCorrectly: false,
+        impostorOutOfGuesses: false,
     };
     rooms[roomId] = newRoom;
     return newRoom;
@@ -282,6 +284,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     room.usedWords = [];
     room.impostorGuessesUsed = 0;
     room.impostorGuessedCorrectly = false;
+    room.impostorOutOfGuesses = false;
 
     if (isPlayerWordMode(room.gameMode)) {
         // The word comes from the players, so it isn't known yet.
@@ -477,6 +480,16 @@ export function confirmOrder(
     return room;
 }
 
+// Whether the impostor still holds a guess: the feature is on and the shared
+// pool has something left in it. Both the in-phase guesses and the final one an
+// ejected impostor is offered come out of this same counter.
+function hasGuessesLeft(room: GameRoom): boolean {
+    return (
+        room.gameOptions.impostorGuessEnabled &&
+        room.impostorGuessesUsed < room.gameOptions.impostorGuessAttempts
+    );
+}
+
 function checkVotingComplete(room: GameRoom) {
     // Prune stale votes from ejected/disconnected players
     Object.keys(room.votes).forEach((voterId) => {
@@ -518,7 +531,10 @@ function checkVotingComplete(room: GameRoom) {
             const ejectedPlayer = room.players.find((p) => p.id === ejectedId);
             if (ejectedPlayer) ejectedPlayer.isEjected = true;
             if (ejectedId === room.impostorId) {
-                if (room.gameOptions.impostorGuessEnabled) {
+                // The last chance is what is left of the pool: an impostor
+                // caught with attempts still on the counter gets to spend one,
+                // one who already burned them all is simply out.
+                if (hasGuessesLeft(room)) {
                     room.phase = 'IMPOSTOR_GUESS';
                     return; // Defer RESULTS until the final guess is submitted/skipped
                 }
@@ -607,12 +623,13 @@ export function submitImpostorGuess(
     if (!normalizedGuess) return null;
 
     // The post-ejection final guess is its own phase (single shot, can skip).
+    // It is what is left of the pool being spent, so it doesn't check the
+    // counter again: reaching the phase at all already required a guess left.
     const isFinalGuess = room.phase === 'IMPOSTOR_GUESS';
     if (!isFinalGuess) {
         // In-phase guess (DRAWING/VOTING), bounded by the shared attempt pool.
         if (room.phase !== 'DRAWING' && room.phase !== 'VOTING') return null;
-        if (room.impostorGuessesUsed >= room.gameOptions.impostorGuessAttempts)
-            return null;
+        if (!hasGuessesLeft(room)) return null;
         room.impostorGuessesUsed++;
     }
 
@@ -629,6 +646,15 @@ export function submitImpostorGuess(
     // Wrong guess.
     if (isFinalGuess) {
         // The ejected impostor used their last chance -> crewmates win.
+        room.phase = 'RESULTS';
+        room.gameEnded = true;
+    } else if (
+        room.gameOptions.impostorLosesWhenOutOfGuesses &&
+        !hasGuessesLeft(room)
+    ) {
+        // The host made the pool lethal: spending it loses the game on the spot,
+        // with no ejection involved (hence the flag — the clients cannot tell).
+        room.impostorOutOfGuesses = true;
         room.phase = 'RESULTS';
         room.gameEnded = true;
     }
@@ -679,6 +705,7 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     room.usedWords = [];
     room.impostorGuessesUsed = 0;
     room.impostorGuessedCorrectly = false;
+    room.impostorOutOfGuesses = false;
     // gameMode is a lobby setting like gameOptions, so it survives Play Again.
     // Clear the lobby-kick blocklist for a fresh game
     delete kickedFromRoom[roomId];
@@ -948,12 +975,14 @@ export function updateGameOptions(
     if (!isPlainObject(options)) return null;
 
     applyGameMode(room, options.gameMode);
-    const sanitizedOptions = sanitizeGameOptionsUpdate(
+    // The payload updates what the host chose; the mode is layered on top after
+    // it, so an option this mode takes over is masked rather than overwritten.
+    const hostOptions = sanitizeGameOptionsUpdate(
         options,
-        room.gameOptions,
-        room.gameMode
+        room.hostGameOptions
     );
-    if (!sanitizedOptions) return null;
-    room.gameOptions = sanitizedOptions;
+    if (!hostOptions) return null;
+    room.hostGameOptions = hostOptions;
+    room.gameOptions = applyModeLockedOptions(hostOptions, room.gameMode);
     return room;
 }

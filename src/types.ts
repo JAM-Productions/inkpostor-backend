@@ -74,6 +74,7 @@ export interface GameOptions {
     playerColorsEnabled: boolean;
     impostorGuessEnabled: boolean;
     impostorGuessAttempts: number;
+    impostorLosesWhenOutOfGuesses: boolean;
     hideHint: boolean;
     turnOrderMode: TurnOrderMode;
 }
@@ -95,7 +96,13 @@ export interface GameRoom {
     currentRound: number;
     ejectedId: string | null;
     gameEnded: boolean;
+    // What the rules actually read: the host's choices with the current mode's
+    // locks applied on top (see MODE_LOCKED_OPTIONS).
     gameOptions: GameOptions;
+    // What the host chose, before those locks. Kept apart so a detour through a
+    // mode that takes an option over doesn't throw the host's value away: it
+    // comes back the moment they select a mode that leaves it alone.
+    hostGameOptions: GameOptions;
     // Kept out of gameOptions on purpose: the mode is applied immediately when the
     // host moves the lobby carousel, while gameOptions are staged until confirmed.
     gameMode: GameMode;
@@ -104,6 +111,9 @@ export interface GameRoom {
     // Impostor guess feature
     impostorGuessesUsed: number; // In-phase guesses spent (DRAWING/VOTING), persists across rounds
     impostorGuessedCorrectly: boolean; // True if the impostor won by guessing the word
+    // True if the impostor lost by spending the whole pool (impostorLosesWhenOutOfGuesses).
+    // The clients cannot infer this one: it ends the game without an ejection.
+    impostorOutOfGuesses: boolean;
 }
 
 export interface WordList {
