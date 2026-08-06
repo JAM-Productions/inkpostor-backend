@@ -612,9 +612,29 @@ describe('Server API and Socket Integration Tests', () => {
 
             expect(hostState.gameOptions).toEqual(updatedOptions);
             expect(playerState.gameOptions).toEqual(updatedOptions);
+            // Nothing is locked in CLASSIC, so both sets travel identical
+            expect(hostState.hostGameOptions).toEqual(updatedOptions);
 
             const room = getRoom(roomId);
             expect(room?.gameOptions).toEqual(updatedOptions);
+
+            // Now a mode that takes the drawing options over: the two sets must
+            // travel apart, or the client would save the masked values back and
+            // the host would lose their settings on the way out of the mode.
+            const spokenHostState = waitForEvent<GameRoom>(
+                hostSocket,
+                'gameStateUpdate'
+            );
+            hostSocket.emit('updateGameOptions', { gameMode: 'ORIGINAL' });
+            const maskedState = await spokenHostState;
+
+            expect(maskedState.gameOptions).toMatchObject({
+                roundTime: DEFAULT_GAME_OPTIONS.roundTime,
+                unlimitedInk: false,
+                playerColorsEnabled: false,
+                impostorGuessEnabled: false,
+            });
+            expect(maskedState.hostGameOptions).toEqual(updatedOptions);
 
             hostSocket.disconnect();
             playerSocket.disconnect();
