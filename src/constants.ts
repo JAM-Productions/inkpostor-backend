@@ -6,6 +6,8 @@ export const ALLOWED_ROUND_TIMES = [20, 25, 30, 35, 40] as const;
 export const MIN_IMPOSTOR_GUESSES = 1;
 export const MAX_IMPOSTOR_GUESSES = 3;
 export const DEFAULT_IMPOSTOR_GUESSES = 1;
+export const MIN_IMPOSTORS = 1;
+export const DEFAULT_IMPOSTOR_COUNT = 1;
 export const GAME_MODES = [
     'CLASSIC',
     'CUSTOM_WORD',
@@ -46,6 +48,8 @@ export const DEFAULT_GAME_OPTIONS: GameOptions = {
     unlimitedInk: false,
     clearCanvasEachRound: true,
     playerColorsEnabled: true,
+    impostorCount: DEFAULT_IMPOSTOR_COUNT,
+    revealImpostorTeammates: true,
     impostorGuessEnabled: true,
     impostorGuessAttempts: DEFAULT_IMPOSTOR_GUESSES,
     impostorLosesWhenOutOfGuesses: false,

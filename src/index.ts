@@ -30,6 +30,7 @@ import {
     submitCustomWord,
     confirmNewWord,
     confirmOrder,
+    getImpostorIds,
 } from './gameManager';
 import { GameRoom, Player, StrokeData, UserPayload } from './types';
 import wordTranslations from './wordTranslations.json';
@@ -576,6 +577,7 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     return {
         ...withoutCustomWords(room),
         impostorId: null, // Hidden
+        impostorIds: [], // Hidden
         secretWord: null, // Hidden
     };
 }
@@ -602,18 +604,31 @@ function translateSecretWord(room: GameRoom, language: string): string | null {
 // it away (`hideHint`). It has to be withheld here rather than hidden by the
 // client: the payload itself must never carry it.
 function hidesCategoryFrom(room: GameRoom, playerId: string): boolean {
+    const impostorIds = getImpostorIds(room);
     return (
         room.gameOptions.hideHint &&
-        playerId === room.impostorId &&
+        impostorIds.includes(playerId) &&
         room.phase !== 'RESULTS' // Everything is revealed once the game is over
     );
 }
 
 function buildRoleAssignment(room: GameRoom, player: Player) {
-    const isImpostor = player.id === room.impostorId;
+    const impostorIds = getImpostorIds(room);
+    const isImpostor = impostorIds.includes(player.id);
     const language = player.language || 'en';
+    const teammates =
+        isImpostor &&
+        room.gameOptions.revealImpostorTeammates &&
+        impostorIds.length > 1
+            ? room.players
+                  .filter(
+                      (p) => impostorIds.includes(p.id) && p.id !== player.id
+                  )
+                  .map((p) => p.name)
+            : [];
     return {
         isImpostor,
+        impostorTeammates: teammates,
         secretWord: isImpostor ? null : translateSecretWord(room, language),
         secretCategory: hidesCategoryFrom(room, player.id)
             ? null

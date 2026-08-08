@@ -32,6 +32,21 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+export function getImpostorIds(room: GameRoom): string[] {
+    if (
+        room.impostorId &&
+        room.impostorIds &&
+        room.impostorIds.length > 0 &&
+        !room.impostorIds.includes(room.impostorId)
+    ) {
+        return [room.impostorId];
+    }
+    if (room.impostorIds && room.impostorIds.length > 0) {
+        return room.impostorIds;
+    }
+    return room.impostorId ? [room.impostorId] : [];
+}
+
 // Some modes take an option over: the value they impose is forced and the host
 // cannot change it while that mode is selected (see MODE_LOCKED_OPTIONS).
 function applyModeLockedOptions(
@@ -74,6 +89,23 @@ function sanitizeGameOptionsUpdate(
     if (typeof options.playerColorsEnabled === 'boolean') {
         nextOptions.playerColorsEnabled = options.playerColorsEnabled;
     }
+    if (
+        typeof options.impostorCount === 'number' &&
+        Number.isFinite(options.impostorCount)
+    ) {
+        const rounded = Math.round(options.impostorCount);
+        const maxImpostors = Math.max(
+            1,
+            Math.floor((MAX_NUM_PLAYERS_PER_ROOM - 1) / 2)
+        );
+        nextOptions.impostorCount = Math.min(
+            maxImpostors,
+            Math.max(1, rounded)
+        );
+    }
+    if (typeof options.revealImpostorTeammates === 'boolean') {
+        nextOptions.revealImpostorTeammates = options.revealImpostorTeammates;
+    }
     if (typeof options.impostorGuessEnabled === 'boolean') {
         nextOptions.impostorGuessEnabled = options.impostorGuessEnabled;
     }
@@ -114,6 +146,7 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         phase: 'LOBBY',
         players: [],
         impostorId: null,
+        impostorIds: [],
         secretWord: null,
         secretCategory: null,
         currentTurnPlayerId: null,
@@ -198,10 +231,29 @@ export function leaveRoom(roomId: string, playerId: string): GameRoom | null {
     }
 
     if (room.phase === 'IMPOSTOR_GUESS') {
-        const impostor = room.players.find((p) => p.id === room.impostorId);
-        if (!impostor || !impostor.isConnected) {
+        const ejectedPlayer = room.players.find((p) => p.id === room.ejectedId);
+        if (!ejectedPlayer || !ejectedPlayer.isConnected) {
+            const activeImpostors = room.players.filter(
+                (p) =>
+                    p.isConnected &&
+                    !p.isEjected &&
+                    room.impostorIds.includes(p.id)
+            );
+            const activeCrewmates = room.players.filter(
+                (p) =>
+                    p.isConnected &&
+                    !p.isEjected &&
+                    !room.impostorIds.includes(p.id)
+            );
+            if (
+                activeImpostors.length === 0 ||
+                activeImpostors.length >= activeCrewmates.length
+            ) {
+                room.gameEnded = true;
+            } else {
+                room.gameEnded = false;
+            }
             room.phase = 'RESULTS';
-            room.gameEnded = true;
         }
     }
 
@@ -255,9 +307,15 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     if (!room || room.hostId !== playerId || room.players.length < 3)
         return null;
 
-    // Pick Impostor
-    const impostorIndex = Math.floor(Math.random() * room.players.length);
-    room.impostorId = room.players[impostorIndex].id;
+    // Pick Impostors
+    const maxImpostors = Math.max(1, Math.floor((room.players.length - 1) / 2));
+    const targetCount = Math.min(
+        maxImpostors,
+        Math.max(1, room.gameOptions.impostorCount ?? 1)
+    );
+    const shuffledPlayers = shuffle(room.players);
+    room.impostorIds = shuffledPlayers.slice(0, targetCount).map((p) => p.id);
+    room.impostorId = room.impostorIds[0] ?? null;
 
     // Setup Turns
     room.turnOrder = shuffle(room.players.map((p) => p.id));
@@ -318,8 +376,9 @@ function checkAllCustomWordsSubmitted(room: GameRoom) {
 
     // The impostor must not be able to win by having their own word drawn, so
     // their submission is excluded from the pool.
+    const impostorIds = getImpostorIds(room);
     const candidates = room.players
-        .filter((p) => p.id !== room.impostorId && p.customWord)
+        .filter((p) => !impostorIds.includes(p.id) && p.customWord)
         .map((p) => p.customWord as string);
 
     if (candidates.length > 0) {
@@ -530,7 +589,8 @@ function checkVotingComplete(room: GameRoom) {
             room.ejectedId = ejectedId;
             const ejectedPlayer = room.players.find((p) => p.id === ejectedId);
             if (ejectedPlayer) ejectedPlayer.isEjected = true;
-            if (ejectedId === room.impostorId) {
+            const impostorIds = getImpostorIds(room);
+            if (ejectedId && impostorIds.includes(ejectedId)) {
                 // The last chance is what is left of the pool: an impostor
                 // caught with attempts still on the counter gets to spend one,
                 // one who already burned them all is simply out.
@@ -538,9 +598,17 @@ function checkVotingComplete(room: GameRoom) {
                     room.phase = 'IMPOSTOR_GUESS';
                     return; // Defer RESULTS until the final guess is submitted/skipped
                 }
-                // Impostor ejected, crewmates win — game over
-                room.gameEnded = true;
             }
+        }
+        const impostorIds = getImpostorIds(room);
+        const activeImpostors = room.players.filter(
+            (p) => p.isConnected && !p.isEjected && impostorIds.includes(p.id)
+        );
+
+        if (activeImpostors.length === 0) {
+            room.gameEnded = true;
+        } else {
+            room.gameEnded = false;
         }
         room.phase = 'RESULTS';
     }
@@ -611,10 +679,11 @@ export function submitImpostorGuess(
 ): GameRoom | null {
     const room = rooms[roomId];
     if (!room) return null;
-    // Only the impostor may guess, and only when the feature is enabled in a
+    // Only an impostor may guess, and only when the feature is enabled in a
     // mode that supports it (the option is already forced off in those modes,
     // so this is just an explicit backstop).
-    if (room.impostorId !== playerId) return null;
+    const impostorIds = getImpostorIds(room);
+    if (!impostorIds.includes(playerId)) return null;
     if (MODE_LOCKED_OPTIONS[room.gameMode].impostorGuessEnabled === false)
         return null;
     if (!room.gameOptions.impostorGuessEnabled) return null;
@@ -645,9 +714,22 @@ export function submitImpostorGuess(
 
     // Wrong guess.
     if (isFinalGuess) {
-        // The ejected impostor used their last chance -> crewmates win.
+        // The ejected impostor used their last chance -> evaluate remaining impostors
+        const activeImpostors = room.players.filter(
+            (p) => p.isConnected && !p.isEjected && impostorIds.includes(p.id)
+        );
+        const activeCrewmates = room.players.filter(
+            (p) => p.isConnected && !p.isEjected && !impostorIds.includes(p.id)
+        );
+        if (
+            activeImpostors.length === 0 ||
+            activeImpostors.length >= activeCrewmates.length
+        ) {
+            room.gameEnded = true;
+        } else {
+            room.gameEnded = false;
+        }
         room.phase = 'RESULTS';
-        room.gameEnded = true;
     } else if (
         room.gameOptions.impostorLosesWhenOutOfGuesses &&
         !hasGuessesLeft(room)
@@ -667,11 +749,25 @@ export function skipImpostorGuess(
 ): GameRoom | null {
     const room = rooms[roomId];
     if (!room) return null;
-    if (room.impostorId !== playerId) return null;
+    const impostorIds = getImpostorIds(room);
+    if (!impostorIds.includes(playerId)) return null;
     if (room.phase !== 'IMPOSTOR_GUESS') return null;
-    // The ejected impostor declined their final guess -> crewmates win.
+    // The ejected impostor declined their final guess -> evaluate remaining impostors
+    const activeImpostors = room.players.filter(
+        (p) => p.isConnected && !p.isEjected && impostorIds.includes(p.id)
+    );
+    const activeCrewmates = room.players.filter(
+        (p) => p.isConnected && !p.isEjected && !impostorIds.includes(p.id)
+    );
+    if (
+        activeImpostors.length === 0 ||
+        activeImpostors.length >= activeCrewmates.length
+    ) {
+        room.gameEnded = true;
+    } else {
+        room.gameEnded = false;
+    }
     room.phase = 'RESULTS';
-    room.gameEnded = true;
     return room;
 }
 
@@ -681,6 +777,7 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     room.phase = 'LOBBY';
     room.currentRound = 1;
     room.impostorId = null;
+    room.impostorIds = [];
     room.secretWord = null;
     room.secretCategory = null;
     room.currentTurnPlayerId = null;
@@ -841,7 +938,8 @@ function executeKick(room: GameRoom, playerId: string) {
     if (playerIndex === -1) return;
 
     const wasCurrentTurn = room.currentTurnPlayerId === playerId;
-    const wasImpostor = playerId === room.impostorId;
+    const impostorIds = getImpostorIds(room);
+    const wasImpostor = impostorIds.includes(playerId);
     const previousTurnIndex = room.turnIndex;
 
     room.players.splice(playerIndex, 1);
@@ -860,22 +958,35 @@ function executeKick(room: GameRoom, playerId: string) {
     });
 
     if (wasImpostor) {
-        room.ejectedId = playerId;
-        room.phase = 'RESULTS';
-        room.gameEnded = true;
-        return;
+        const activeImpostors = room.players.filter(
+            (p) => p.isConnected && !p.isEjected && impostorIds.includes(p.id)
+        );
+        const activeCrewmates = room.players.filter(
+            (p) => p.isConnected && !p.isEjected && !impostorIds.includes(p.id)
+        );
+        if (
+            activeImpostors.length === 0 ||
+            activeImpostors.length >= activeCrewmates.length
+        ) {
+            room.ejectedId = playerId;
+            room.phase = 'RESULTS';
+            room.gameEnded = true;
+            return;
+        }
     }
 
     const activePlayers = room.players.filter((p) => p.isConnected);
     if (activePlayers.length < 3) {
         room.phase = 'RESULTS';
         room.gameEnded = true;
-        // If the impostor is no longer actively playing (disconnected, kicked or ejected),
+        // If an impostor is no longer actively playing (disconnected, kicked or ejected),
         // crewmates win by attrition — signal this by setting ejectedId to impostorId
         const impostorActive = room.players.some(
-            (p) => p.id === room.impostorId && p.isConnected
+            (p) => impostorIds.includes(p.id) && p.isConnected
         );
-        room.ejectedId = impostorActive ? playerId : room.impostorId;
+        room.ejectedId = impostorActive
+            ? playerId
+            : (impostorIds[0] ?? playerId);
         return;
     }
 

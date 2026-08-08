@@ -596,6 +596,8 @@ describe('Server API and Socket Integration Tests', () => {
                 unlimitedInk: true,
                 clearCanvasEachRound: false,
                 playerColorsEnabled: true,
+                impostorCount: 1,
+                revealImpostorTeammates: true,
                 impostorGuessEnabled: true,
                 impostorGuessAttempts: 3,
                 impostorLosesWhenOutOfGuesses: true,

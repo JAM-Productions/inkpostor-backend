@@ -51,7 +51,17 @@ moment the host picks a mode that leaves it alone, and the options modal edits
 
 A spoken mode locks the drawing options *away* rather than showing them with a
 padlock: the client hides those sections entirely and renders `turnOrderMode`
-instead. `hideHint` is available in **every** mode.
+instead. `hideHint` and `impostorCount` are available in **every** mode.
+
+### Extra Inkpostors (`impostorCount` & `revealImpostorTeammates`)
+* **Maximum Inkpostors**: Calculated dynamically from lobby player count $N$:
+  $$\text{maxImpostors} = \max\left(1, \left\lfloor \frac{N - 1}{2} \right\rfloor\right)$$
+  For example: 5 players allows up to 2 Inkpostors; 7 players allows up to 3 Inkpostors.
+* **Teammate Reveal**: Sub-option `revealImpostorTeammates` (default: `true`) appears when `impostorCount > 1`. When enabled, Inkpostors see their fellow Inkpostor names during `ROLE_REVEAL`.
+* **Multi-Inkpostor Win & Ejection Rules**:
+  * Ejecting an Inkpostor when active Inkpostors remain does NOT end the game; the game proceeds to `RESULTS` informing how many Inkpostors remain, then continues to the next round.
+  * Crewmates win when all Inkpostors are eliminated (`activeImpostors.length === 0`).
+  * Inkpostors win when active Inkpostors outnumber or equal active Crewmates (`activeImpostors.length >= activeCrewmates.length`), or when an Inkpostor guesses the secret word.
 
 ## Game Phases
 

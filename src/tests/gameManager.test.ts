@@ -58,6 +58,8 @@ describe('gameManager', () => {
                 unlimitedInk: false,
                 clearCanvasEachRound: true,
                 playerColorsEnabled: true,
+                impostorCount: 1,
+                revealImpostorTeammates: true,
                 impostorGuessEnabled: true,
                 impostorGuessAttempts: 1,
                 impostorLosesWhenOutOfGuesses: false,
@@ -2803,6 +2805,88 @@ describe('gameManager', () => {
             room.impostorOutOfGuesses = true;
             startGame('guess-lethal-reset', 'host1');
             expect(room.impostorOutOfGuesses).toBe(false);
+        });
+    });
+
+    describe('multi-impostor options and game flow', () => {
+        it('should sanitize impostorCount and revealImpostorTeammates options', () => {
+            const room = createRoom('multi-imp-opt', 'host1');
+            updateGameOptions('multi-imp-opt', 'host1', {
+                impostorCount: 3,
+                revealImpostorTeammates: false,
+            });
+            expect(room.gameOptions.impostorCount).toBe(3);
+            expect(room.gameOptions.revealImpostorTeammates).toBe(false);
+        });
+
+        it('should clamp impostorCount to maximum allowed for player count upon starting game', () => {
+            const room = createRoom('multi-imp-clamp', 'p1');
+            ['p1', 'p2', 'p3', 'p4', 'p5'].forEach((id) =>
+                joinRoom('multi-imp-clamp', createPlayer(id, id))
+            );
+            // 5 players -> max impostors is Math.floor((5-1)/2) = 2
+            updateGameOptions('multi-imp-clamp', 'p1', { impostorCount: 4 });
+            startGame('multi-imp-clamp', 'p1');
+
+            expect(room.impostorIds.length).toBe(2);
+            expect(room.impostorId).toBe(room.impostorIds[0]);
+        });
+
+        it('should continue game to next round when 1st impostor is ejected and 2nd remains', () => {
+            const room = createRoom('multi-imp-eject', 'p1');
+            ['p1', 'p2', 'p3', 'p4', 'p5'].forEach((id) =>
+                joinRoom('multi-imp-eject', createPlayer(id, id))
+            );
+            updateGameOptions('multi-imp-eject', 'p1', {
+                impostorCount: 2,
+                impostorGuessEnabled: false,
+            });
+            startGame('multi-imp-eject', 'p1');
+
+            const imp1 = room.impostorIds[0];
+            const imp2 = room.impostorIds[1];
+            const crewmates = room.players.filter(
+                (p) => !room.impostorIds.includes(p.id)
+            );
+
+            room.phase = 'VOTING';
+            // Everyone except imp1 votes imp1, imp1 votes skip
+            room.players.forEach((p) => {
+                castVote(
+                    'multi-imp-eject',
+                    p.id,
+                    p.id === imp1 ? 'skip' : imp1
+                );
+            });
+
+            expect(room.ejectedId).toBe(imp1);
+            expect(room.phase).toBe('RESULTS');
+            expect(room.gameEnded).toBe(false); // Game NOT ended because imp2 is still active
+
+            // Next round
+            room.players
+                .filter((p) => !p.isEjected)
+                .forEach((p) => {
+                    nextRound('multi-imp-eject', p.id);
+                });
+
+            expect(room.phase).toBe('DRAWING');
+
+            // Vote out imp2 in round 2
+            room.phase = 'VOTING';
+            room.players
+                .filter((p) => !p.isEjected)
+                .forEach((p) => {
+                    castVote(
+                        'multi-imp-eject',
+                        p.id,
+                        p.id === imp2 ? 'skip' : imp2
+                    );
+                });
+
+            expect(room.ejectedId).toBe(imp2);
+            expect(room.phase).toBe('RESULTS');
+            expect(room.gameEnded).toBe(true); // Game ended because all impostors are eliminated
         });
     });
 });
