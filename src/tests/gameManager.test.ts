@@ -2845,9 +2845,6 @@ describe('gameManager', () => {
 
             const imp1 = room.impostorIds[0];
             const imp2 = room.impostorIds[1];
-            const crewmates = room.players.filter(
-                (p) => !room.impostorIds.includes(p.id)
-            );
 
             room.phase = 'VOTING';
             // Everyone except imp1 votes imp1, imp1 votes skip
