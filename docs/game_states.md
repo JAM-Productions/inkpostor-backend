@@ -108,7 +108,7 @@ RESULTS → LOBBY              (host clicks Play Again)
 > player, including disconnected ones: no round starts until everyone still in
 > the game has seen the screen, even if that means waiting for a reconnection
 > (the host can always end the game). Ejected players may watch the reveal —
-> they are never the impostor, since ejecting the impostor ends the game — but
+> in multi-impostor games, ejected players may include eliminated Inkpostors when other Inkpostors remain in play — but
 > are not waited for.
 
 ### Disconnect-driven transitions

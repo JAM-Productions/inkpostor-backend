@@ -570,15 +570,23 @@ function withoutCustomWords(room: GameRoom) {
 function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     if (!room) return null;
     // If game is over, reveal everything (except the unused custom words)
-    if (room.phase === 'RESULTS') return withoutCustomWords(room);
-    // Ensure only authenticated user data is exposed
-    // (socket user info is attached in middleware; no secret data here)
+    if (room.gameEnded) return withoutCustomWords(room);
+
+    const impostorIds = getImpostorIds(room);
+    const ejectedWasImpostor = room.ejectedId
+        ? impostorIds.includes(room.ejectedId)
+        : false;
+    const remainingImpostorCount = room.players.filter(
+        (p) => !p.isEjected && impostorIds.includes(p.id)
+    ).length;
 
     return {
         ...withoutCustomWords(room),
         impostorId: null, // Hidden
         impostorIds: [], // Hidden
         secretWord: null, // Hidden
+        ejectedWasImpostor,
+        remainingImpostorCount,
     };
 }
 

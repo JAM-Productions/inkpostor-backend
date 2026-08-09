@@ -1581,25 +1581,56 @@ describe('gameManager', () => {
             expect(result!.gameEnded).toBe(true);
         });
 
-        it('should NOT set gameEnded when a crewmate is ejected by vote', () => {
+        it('should NOT set gameEnded when a crewmate is ejected by vote if crewmates still outnumber impostors', () => {
             const room = createRoom('room-voting-crewmate-ejected', 'host1');
             const p1 = createPlayer('p1', 'Alice');
             const p2 = createPlayer('p2', 'Bob');
             const p3 = createPlayer('p3', 'Charlie');
+            const p4 = createPlayer('p4', 'Dave');
             joinRoom('room-voting-crewmate-ejected', p1);
             joinRoom('room-voting-crewmate-ejected', p2);
             joinRoom('room-voting-crewmate-ejected', p3);
+            joinRoom('room-voting-crewmate-ejected', p4);
 
             room.phase = 'VOTING';
             room.impostorId = 'p1';
 
             castVote('room-voting-crewmate-ejected', 'p1', 'p3');
             castVote('room-voting-crewmate-ejected', 'p2', 'p3');
+            castVote('room-voting-crewmate-ejected', 'p4', 'p3');
             const result = castVote('room-voting-crewmate-ejected', 'p3', 'p1');
 
             expect(result!.phase).toBe('RESULTS');
             expect(result!.ejectedId).toBe('p3');
             expect(result!.gameEnded).toBe(false);
+        });
+
+        it('should set gameEnded when a crewmate ejection causes impostors to reach parity in multi-impostor mode', () => {
+            const room = createRoom('room-voting-parity', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            const p4 = createPlayer('p4', 'Dave');
+            const p5 = createPlayer('p5', 'Eve');
+            joinRoom('room-voting-parity', p1);
+            joinRoom('room-voting-parity', p2);
+            joinRoom('room-voting-parity', p3);
+            joinRoom('room-voting-parity', p4);
+            joinRoom('room-voting-parity', p5);
+
+            room.phase = 'VOTING';
+            room.impostorIds = ['p1', 'p2'];
+            room.impostorId = 'p1';
+
+            castVote('room-voting-parity', 'p1', 'p5');
+            castVote('room-voting-parity', 'p2', 'p5');
+            castVote('room-voting-parity', 'p3', 'p5');
+            castVote('room-voting-parity', 'p4', 'p1');
+            const result = castVote('room-voting-parity', 'p5', 'p1');
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.ejectedId).toBe('p5');
+            expect(result!.gameEnded).toBe(true);
         });
 
         it('should only require votes from non-ejected connected players to complete voting & handle ties', () => {
