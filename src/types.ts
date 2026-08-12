@@ -72,6 +72,8 @@ export interface GameOptions {
     unlimitedInk: boolean;
     clearCanvasEachRound: boolean;
     playerColorsEnabled: boolean;
+    impostorCount: number;
+    revealImpostorTeammates: boolean;
     impostorGuessEnabled: boolean;
     impostorGuessAttempts: number;
     impostorLosesWhenOutOfGuesses: boolean;
@@ -85,6 +87,7 @@ export interface GameRoom {
     phase: GamePhase;
     players: Player[];
     impostorId: string | null;
+    impostorIds: string[];
     secretWord: string | null;
     secretCategory: string | null;
     currentTurnPlayerId: string | null;

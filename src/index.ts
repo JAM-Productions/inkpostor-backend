@@ -30,6 +30,7 @@ import {
     submitCustomWord,
     confirmNewWord,
     confirmOrder,
+    getImpostorIds,
 } from './gameManager';
 import { GameRoom, Player, StrokeData, UserPayload } from './types';
 import wordTranslations from './wordTranslations.json';
@@ -569,14 +570,23 @@ function withoutCustomWords(room: GameRoom) {
 function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     if (!room) return null;
     // If game is over, reveal everything (except the unused custom words)
-    if (room.phase === 'RESULTS') return withoutCustomWords(room);
-    // Ensure only authenticated user data is exposed
-    // (socket user info is attached in middleware; no secret data here)
+    if (room.gameEnded) return withoutCustomWords(room);
+
+    const impostorIds = getImpostorIds(room);
+    const ejectedWasImpostor = room.ejectedId
+        ? impostorIds.includes(room.ejectedId)
+        : false;
+    const remainingImpostorCount = room.players.filter(
+        (p) => !p.isEjected && impostorIds.includes(p.id)
+    ).length;
 
     return {
         ...withoutCustomWords(room),
         impostorId: null, // Hidden
+        impostorIds: [], // Hidden
         secretWord: null, // Hidden
+        ejectedWasImpostor,
+        remainingImpostorCount,
     };
 }
 
@@ -602,18 +612,31 @@ function translateSecretWord(room: GameRoom, language: string): string | null {
 // it away (`hideHint`). It has to be withheld here rather than hidden by the
 // client: the payload itself must never carry it.
 function hidesCategoryFrom(room: GameRoom, playerId: string): boolean {
+    const impostorIds = getImpostorIds(room);
     return (
         room.gameOptions.hideHint &&
-        playerId === room.impostorId &&
+        impostorIds.includes(playerId) &&
         room.phase !== 'RESULTS' // Everything is revealed once the game is over
     );
 }
 
 function buildRoleAssignment(room: GameRoom, player: Player) {
-    const isImpostor = player.id === room.impostorId;
+    const impostorIds = getImpostorIds(room);
+    const isImpostor = impostorIds.includes(player.id);
     const language = player.language || 'en';
+    const teammates =
+        isImpostor &&
+        room.gameOptions.revealImpostorTeammates &&
+        impostorIds.length > 1
+            ? room.players
+                  .filter(
+                      (p) => impostorIds.includes(p.id) && p.id !== player.id
+                  )
+                  .map((p) => p.name)
+            : [];
     return {
         isImpostor,
+        impostorTeammates: teammates,
         secretWord: isImpostor ? null : translateSecretWord(room, language),
         secretCategory: hidesCategoryFrom(room, player.id)
             ? null
