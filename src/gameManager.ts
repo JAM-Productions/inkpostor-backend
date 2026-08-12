@@ -61,9 +61,7 @@ export function resolveGameEnd(room: GameRoom): boolean {
 
     const isEnded =
         activeImpostors.length === 0 ||
-        (impostorIds.length > 1
-            ? activeImpostors.length >= activeCrewmates.length
-            : activeCrewmates.length === 0);
+        activeImpostors.length >= activeCrewmates.length;
 
     room.gameEnded = isEnded;
     return isEnded;
@@ -912,7 +910,6 @@ function executeKick(room: GameRoom, playerId: string) {
 
     const wasCurrentTurn = room.currentTurnPlayerId === playerId;
     const impostorIds = getImpostorIds(room);
-    const wasImpostor = impostorIds.includes(playerId);
     const previousTurnIndex = room.turnIndex;
 
     room.players.splice(playerIndex, 1);
@@ -930,14 +927,6 @@ function executeKick(room: GameRoom, playerId: string) {
         );
     });
 
-    if (wasImpostor) {
-        if (resolveGameEnd(room)) {
-            room.ejectedId = playerId;
-            room.phase = 'RESULTS';
-            return;
-        }
-    }
-
     const activePlayers = room.players.filter((p) => p.isConnected);
     if (activePlayers.length < 3) {
         room.phase = 'RESULTS';
@@ -950,6 +939,12 @@ function executeKick(room: GameRoom, playerId: string) {
         room.ejectedId = impostorActive
             ? playerId
             : (impostorIds[0] ?? playerId);
+        return;
+    }
+
+    if (resolveGameEnd(room)) {
+        room.ejectedId = playerId;
+        room.phase = 'RESULTS';
         return;
     }
 

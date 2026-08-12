@@ -1633,6 +1633,27 @@ describe('gameManager', () => {
             expect(result!.gameEnded).toBe(true);
         });
 
+        it('should set gameEnded when a crewmate ejection causes 1v1 parity in a 3-player single-impostor game', () => {
+            const room = createRoom('room-voting-3p-parity', 'host1');
+            const p1 = createPlayer('p1', 'Alice');
+            const p2 = createPlayer('p2', 'Bob');
+            const p3 = createPlayer('p3', 'Charlie');
+            joinRoom('room-voting-3p-parity', p1);
+            joinRoom('room-voting-3p-parity', p2);
+            joinRoom('room-voting-3p-parity', p3);
+
+            room.phase = 'VOTING';
+            room.impostorId = 'p1';
+
+            castVote('room-voting-3p-parity', 'p1', 'p3');
+            castVote('room-voting-3p-parity', 'p2', 'p3');
+            const result = castVote('room-voting-3p-parity', 'p3', 'p1');
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.ejectedId).toBe('p3');
+            expect(result!.gameEnded).toBe(true);
+        });
+
         it('should only require votes from non-ejected connected players to complete voting & handle ties', () => {
             const room = createRoom('room-voting-majority', 'host1');
             const p1 = createPlayer('p1', 'Alice');

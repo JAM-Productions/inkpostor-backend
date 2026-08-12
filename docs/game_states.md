@@ -108,8 +108,8 @@ RESULTS → LOBBY              (host clicks Play Again)
 > player, including disconnected ones: no round starts until everyone still in
 > the game has seen the screen, even if that means waiting for a reconnection
 > (the host can always end the game). Ejected players may watch the reveal —
-> in multi-impostor games, ejected players may include eliminated Inkpostors when other Inkpostors remain in play — but
-> are not waited for.
+> in multi-impostor games, ejected players may include eliminated Inkpostors
+> when other Inkpostors remain in play — but are not waited for.
 
 ### Disconnect-driven transitions
 
@@ -149,6 +149,8 @@ RESULTS → ORDER_INFO                (same, in a spoken mode)
 
 | Condition | Outcome |
 |---|---|
+| All Inkpostors eliminated (`activeImpostors.length === 0`) | 🟢 **Crewmates win** — Inkpostors Defeated |
+| Inkpostors reach parity (`activeImpostors.length >= activeCrewmates.length`) | 🔴 **Inkpostors win** — Inkpostors Parity Victory |
 | Inkpostor ejected via voting (`ejectedId === impostorId`) | 🟢 **Crewmates win** — Inkpostor Defeated *(unless they still hold a guess → first goes to `IMPOSTOR_GUESS`)* |
 | Inkpostor ejected via vote-kick (`ejectedId === impostorId`) | 🟢 **Crewmates win** — Inkpostor Defeated |
 | Crewmate kicked, impostor still active, connected players < 3 | 🔴 **Inkpostor wins** |
@@ -160,7 +162,7 @@ RESULTS → ORDER_INFO                (same, in a spoken mode)
 | Inkpostor spends the whole guess pool while `impostorLosesWhenOutOfGuesses` is on | 🟢 **Crewmates win** — Inkpostor Defeated (`impostorOutOfGuesses = true`, no ejection involved) |
 | Inkpostor disconnects while ejected and owing a final guess (in `IMPOSTOR_GUESS`, or a `VOTING` resolution that would enter it) | 🟢 **Crewmates win** — counts as a surrender (`ejectedId === impostorId`) |
 
-> **Active player** = `isConnected && !isEjected`
+> **Active player (for win/loss conditions)** = `!isEjected` (disconnected players remain assigned to their team until reconnected or kicked).
 
 ---
 
