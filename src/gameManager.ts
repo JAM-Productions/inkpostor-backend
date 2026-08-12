@@ -149,6 +149,9 @@ function sanitizeGameOptionsUpdate(
     if (TURN_ORDER_MODES.includes(options.turnOrderMode as TurnOrderMode)) {
         nextOptions.turnOrderMode = options.turnOrderMode as TurnOrderMode;
     }
+    if (typeof options.preventRepeatImpostors === 'boolean') {
+        nextOptions.preventRepeatImpostors = options.preventRepeatImpostors;
+    }
 
     if (!nextOptions.impostorGuessEnabled) {
         nextOptions.impostorLosesWhenOutOfGuesses =
@@ -308,6 +311,39 @@ function assignRandomWord(room: GameRoom) {
     room.usedWords.push(picked.word);
 }
 
+// Helper for weighted random sampling without replacement
+function pickWeighted<T extends { id: string }>(
+    players: T[],
+    getWeight: (p: T) => number,
+    count: number
+): T[] {
+    const pool = [...players];
+    const picked: T[] = [];
+    const target = Math.min(count, pool.length);
+
+    for (let step = 0; step < target; step++) {
+        const totalWeight = pool.reduce((sum, p) => sum + getWeight(p), 0);
+        if (totalWeight <= 0) {
+            const remainingShuffled = shuffle(pool);
+            picked.push(...remainingShuffled.slice(0, target - step));
+            break;
+        }
+        let rnd = Math.random() * totalWeight;
+        let selectedIndex = 0;
+        for (let i = 0; i < pool.length; i++) {
+            rnd -= getWeight(pool[i]);
+            if (rnd <= 0) {
+                selectedIndex = i;
+                break;
+            }
+        }
+        picked.push(pool[selectedIndex]);
+        pool.splice(selectedIndex, 1);
+    }
+
+    return picked;
+}
+
 export function startGame(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.hostId !== playerId || room.players.length < 3)
@@ -319,9 +355,25 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
         maxImpostors,
         Math.max(1, room.gameOptions.impostorCount ?? 1)
     );
-    const shuffledPlayers = shuffle(room.players);
-    room.impostorIds = shuffledPlayers.slice(0, targetCount).map((p) => p.id);
+    let pickedPlayers: Player[] = [];
+    if (
+        room.gameOptions.preventRepeatImpostors &&
+        room.lastImpostorIds &&
+        room.lastImpostorIds.length > 0
+    ) {
+        // Weighted selection: previous impostors get a reduced weight of 0.2 (5x lower probability)
+        pickedPlayers = pickWeighted(
+            room.players,
+            (p) => (room.lastImpostorIds!.includes(p.id) ? 0.2 : 1.0),
+            targetCount
+        );
+    } else {
+        pickedPlayers = shuffle(room.players).slice(0, targetCount);
+    }
+
+    room.impostorIds = pickedPlayers.map((p) => p.id);
     room.impostorId = room.impostorIds[0] ?? null;
+    room.lastImpostorIds = [...room.impostorIds];
 
     // Setup Turns
     room.turnOrder = shuffle(room.players.map((p) => p.id));

@@ -79,6 +79,7 @@ export interface GameOptions {
     impostorLosesWhenOutOfGuesses: boolean;
     hideHint: boolean;
     turnOrderMode: TurnOrderMode;
+    preventRepeatImpostors: boolean;
 }
 
 export interface GameRoom {
@@ -88,6 +89,7 @@ export interface GameRoom {
     players: Player[];
     impostorId: string | null;
     impostorIds: string[];
+    lastImpostorIds?: string[];
     secretWord: string | null;
     secretCategory: string | null;
     currentTurnPlayerId: string | null;

@@ -65,6 +65,7 @@ describe('gameManager', () => {
                 impostorLosesWhenOutOfGuesses: false,
                 hideHint: false,
                 turnOrderMode: DEFAULT_TURN_ORDER_MODE,
+                preventRepeatImpostors: true,
             });
             expect(room.gameMode).toBe('CLASSIC');
 
@@ -370,6 +371,45 @@ describe('gameManager', () => {
             expect(result!.impostorId).not.toBeNull();
             expect(result!.turnOrder.length).toBe(3);
             expect(room.players.every((p) => !p.hasSubmittedWord)).toBe(true);
+        });
+
+        it('should heavily reduce (weight) repeating the previous game impostor when preventRepeatImpostors is true', () => {
+            const room = createRoom('room-weighted-repeat', 'host1');
+            ['host1', 'p2', 'p3', 'p4'].forEach((id) =>
+                joinRoom('room-weighted-repeat', createPlayer(id, id))
+            );
+
+            let repeatCount = 0;
+            const TOTAL_RUNS = 1000;
+
+            for (let i = 0; i < TOTAL_RUNS; i++) {
+                room.lastImpostorIds = ['host1'];
+                startGame('room-weighted-repeat', 'host1');
+                if (room.impostorId === 'host1') {
+                    repeatCount++;
+                }
+                playAgain('room-weighted-repeat', 'host1');
+            }
+
+            // Unweighted expectation: 250 / 1000 (25%)
+            // Weighted (0.2 vs 3.0) expectation: 62.5 / 1000 (6.25%)
+            expect(repeatCount).toBeLessThan(120);
+            expect(repeatCount).toBeGreaterThan(0);
+        });
+
+        it('should allow repeating impostor with normal probability when preventRepeatImpostors is false', () => {
+            const room = createRoom('room-allow-repeat', 'host1');
+            ['host1', 'p2', 'p3', 'p4'].forEach((id) =>
+                joinRoom('room-allow-repeat', createPlayer(id, id))
+            );
+            updateGameOptions('room-allow-repeat', 'host1', {
+                preventRepeatImpostors: false,
+            });
+
+            expect(room.gameOptions.preventRepeatImpostors).toBe(false);
+
+            startGame('room-allow-repeat', 'host1');
+            expect(room.impostorId).not.toBeNull();
         });
     });
 
