@@ -2968,6 +2968,73 @@ describe('gameManager', () => {
             expect(room.impostorId).toBe(room.impostorIds[0]);
         });
 
+        // The count the host saved outlives the players it was chosen for, so a
+        // room that shrinks brings it back into range instead of advertising a
+        // number it would then cut on start.
+        it('should lower impostorCount when a player leaves the lobby', () => {
+            const room = createRoom('imp-count-leave', 'p1');
+            ['p1', 'p2', 'p3', 'p4', 'p5'].forEach((id) =>
+                joinRoom('imp-count-leave', createPlayer(id, id))
+            );
+            updateGameOptions('imp-count-leave', 'p1', {
+                impostorCount: 2,
+                revealImpostorTeammates: false,
+            });
+
+            // 5 players allow 2 impostors, the 4 that are left only 1
+            leaveRoom('imp-count-leave', 'p5');
+
+            expect(room.gameOptions.impostorCount).toBe(1);
+            expect(room.hostGameOptions.impostorCount).toBe(1);
+            // Nothing to reveal to a lone impostor
+            expect(room.gameOptions.revealImpostorTeammates).toBe(true);
+        });
+
+        it('should keep impostorCount when the lobby is still big enough', () => {
+            const room = createRoom('imp-count-stays', 'p1');
+            ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'].forEach((id) =>
+                joinRoom('imp-count-stays', createPlayer(id, id))
+            );
+            updateGameOptions('imp-count-stays', 'p1', {
+                impostorCount: 2,
+                revealImpostorTeammates: false,
+            });
+
+            // 6 players still allow 2
+            leaveRoom('imp-count-stays', 'p7');
+
+            expect(room.gameOptions.impostorCount).toBe(2);
+            expect(room.gameOptions.revealImpostorTeammates).toBe(false);
+        });
+
+        it('should lower impostorCount when the host kicks a player', () => {
+            const room = createRoom('imp-count-kick', 'p1');
+            ['p1', 'p2', 'p3', 'p4', 'p5'].forEach((id) =>
+                joinRoom('imp-count-kick', createPlayer(id, id))
+            );
+            updateGameOptions('imp-count-kick', 'p1', { impostorCount: 2 });
+
+            kickPlayer('imp-count-kick', 'p1', 'p5');
+
+            expect(room.gameOptions.impostorCount).toBe(1);
+        });
+
+        it('should not raise impostorCount when a new player joins', () => {
+            const room = createRoom('imp-count-rejoin', 'p1');
+            ['p1', 'p2', 'p3', 'p4', 'p5'].forEach((id) =>
+                joinRoom('imp-count-rejoin', createPlayer(id, id))
+            );
+            updateGameOptions('imp-count-rejoin', 'p1', { impostorCount: 2 });
+            leaveRoom('imp-count-rejoin', 'p5');
+
+            // The free seat is taken again: the second impostor is the host's to
+            // ask for, not something the room hands back on its own
+            joinRoom('imp-count-rejoin', createPlayer('p6', 'p6'));
+
+            expect(room.players.length).toBe(5);
+            expect(room.gameOptions.impostorCount).toBe(1);
+        });
+
         it('should continue game to next round when 1st impostor is ejected and 2nd remains', () => {
             const room = createRoom('multi-imp-eject', 'p1');
             ['p1', 'p2', 'p3', 'p4', 'p5'].forEach((id) =>

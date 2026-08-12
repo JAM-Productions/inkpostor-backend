@@ -8,6 +8,11 @@ export const MAX_IMPOSTOR_GUESSES = 3;
 export const DEFAULT_IMPOSTOR_GUESSES = 1;
 export const MIN_IMPOSTORS = 1;
 export const DEFAULT_IMPOSTOR_COUNT = 1;
+// Impostors a room of this size can hold: they always have to be outnumbered.
+// Both the count the game starts with and the one the lobby keeps go through it,
+// so a room never advertises more impostors than it would deal.
+export const getMaxImpostors = (playerCount: number): number =>
+    Math.max(MIN_IMPOSTORS, Math.floor((playerCount - 1) / 2));
 export const REPEAT_IMPOSTOR_WEIGHT = 0.2;
 export const GAME_MODES = [
     'CLASSIC',
