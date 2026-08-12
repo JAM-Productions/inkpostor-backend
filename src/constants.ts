@@ -8,6 +8,7 @@ export const MAX_IMPOSTOR_GUESSES = 3;
 export const DEFAULT_IMPOSTOR_GUESSES = 1;
 export const MIN_IMPOSTORS = 1;
 export const DEFAULT_IMPOSTOR_COUNT = 1;
+export const REPEAT_IMPOSTOR_WEIGHT = 0.2;
 export const GAME_MODES = [
     'CLASSIC',
     'CUSTOM_WORD',
@@ -55,6 +56,7 @@ export const DEFAULT_GAME_OPTIONS: GameOptions = {
     impostorLosesWhenOutOfGuesses: false,
     hideHint: false,
     turnOrderMode: DEFAULT_TURN_ORDER_MODE,
+    preventRepeatImpostors: true,
 };
 
 // The guessing sub-option means nothing while the feature itself is off, so

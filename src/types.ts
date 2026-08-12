@@ -79,6 +79,7 @@ export interface GameOptions {
     impostorLosesWhenOutOfGuesses: boolean;
     hideHint: boolean;
     turnOrderMode: TurnOrderMode;
+    preventRepeatImpostors: boolean;
 }
 
 export interface GameRoom {

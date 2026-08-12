@@ -58,6 +58,7 @@ instead. `hideHint` and `impostorCount` are available in **every** mode.
   $$\text{maxImpostors} = \max\left(1, \left\lfloor \frac{N - 1}{2} \right\rfloor\right)$$
   For example: 5 players allows up to 2 Inkpostors; 7 players allows up to 3 Inkpostors.
 * **Teammate Reveal**: Sub-option `revealImpostorTeammates` (default: `true`) appears when `impostorCount > 1`. When enabled, Inkpostors see their fellow Inkpostor names during `ROLE_REVEAL`.
+* **Prevent Repeat Inkpostors**: Sub-option `preventRepeatImpostors` (default: `true`) reduces the probability of electing the same Inkpostor(s) several games in a row when playing consecutive games in the same room (`playAgain`). When enabled, previous Inkpostors receive a $5\times$ lower selection weight ($0.2$ vs $1.0$) in weighted random sampling, significantly suppressing consecutive streaks without completely eliminating repeat possibility.
 * **Multi-Inkpostor Win & Ejection Rules**:
   * Ejecting an Inkpostor when active Inkpostors remain does NOT end the game; the game proceeds to `RESULTS` informing how many Inkpostors remain, then continues to the next round.
   * Crewmates win when all Inkpostors are eliminated (`activeImpostors.length === 0`).

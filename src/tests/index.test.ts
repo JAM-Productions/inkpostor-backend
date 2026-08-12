@@ -603,6 +603,7 @@ describe('Server API and Socket Integration Tests', () => {
                 impostorLosesWhenOutOfGuesses: true,
                 hideHint: true,
                 turnOrderMode: 'RANDOM_STARTER',
+                preventRepeatImpostors: true,
             };
 
             hostSocket.emit('updateGameOptions', updatedOptions);
