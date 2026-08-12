@@ -21,12 +21,14 @@ import {
     MAX_NUM_PLAYERS_PER_ROOM,
     MIN_CUSTOM_WORD_LENGTH,
     MIN_IMPOSTOR_GUESSES,
+    REPEAT_IMPOSTOR_WEIGHT,
     SPECIAL_CATEGORY,
     TURN_ORDER_MODES,
 } from './constants';
 
 const rooms: Record<string, GameRoom> = {};
 const kickedFromRoom: Record<string, Set<string>> = {}; // roomId -> Set<playerId>
+const lastImpostors: Record<string, string[]> = {}; // roomId -> Array of player IDs
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -202,6 +204,10 @@ export function getRoom(roomId: string): GameRoom | undefined {
     return rooms[roomId];
 }
 
+export function getLastImpostorIds(roomId: string): string[] | undefined {
+    return lastImpostors[roomId];
+}
+
 export function joinRoom(roomId: string, player: Player): GameRoom | null {
     const room = rooms[roomId];
     if (!room) return null;
@@ -356,15 +362,16 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
         Math.max(1, room.gameOptions.impostorCount ?? 1)
     );
     let pickedPlayers: Player[] = [];
+    const prevImpostors = lastImpostors[roomId];
     if (
         room.gameOptions.preventRepeatImpostors &&
-        room.lastImpostorIds &&
-        room.lastImpostorIds.length > 0
+        prevImpostors &&
+        prevImpostors.length > 0
     ) {
-        // Weighted selection: previous impostors get a reduced weight of 0.2 (5x lower probability)
         pickedPlayers = pickWeighted(
             room.players,
-            (p) => (room.lastImpostorIds!.includes(p.id) ? 0.2 : 1.0),
+            (p) =>
+                prevImpostors.includes(p.id) ? REPEAT_IMPOSTOR_WEIGHT : 1.0,
             targetCount
         );
     } else {
@@ -373,7 +380,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
 
     room.impostorIds = pickedPlayers.map((p) => p.id);
     room.impostorId = room.impostorIds[0] ?? null;
-    room.lastImpostorIds = [...room.impostorIds];
+    lastImpostors[roomId] = [...room.impostorIds];
 
     // Setup Turns
     room.turnOrder = shuffle(room.players.map((p) => p.id));

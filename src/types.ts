@@ -89,7 +89,6 @@ export interface GameRoom {
     players: Player[];
     impostorId: string | null;
     impostorIds: string[];
-    lastImpostorIds?: string[];
     secretWord: string | null;
     secretCategory: string | null;
     currentTurnPlayerId: string | null;

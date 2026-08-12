@@ -17,6 +17,7 @@ import {
     kickPlayer,
     voteKickPlayer,
     updateGameOptions,
+    getLastImpostorIds,
     submitImpostorGuess,
     skipImpostorGuess,
     submitCustomWord,
@@ -373,31 +374,60 @@ describe('gameManager', () => {
             expect(room.players.every((p) => !p.hasSubmittedWord)).toBe(true);
         });
 
+        it('should record last impostors and persist across playAgain', () => {
+            const room = createRoom('room-history-persist', 'host1');
+            ['host1', 'p2', 'p3', 'p4'].forEach((id) =>
+                joinRoom('room-history-persist', createPlayer(id, id))
+            );
+
+            expect(getLastImpostorIds('room-history-persist')).toBeUndefined();
+
+            startGame('room-history-persist', 'host1');
+            const g1Impostor = room.impostorId!;
+            expect(getLastImpostorIds('room-history-persist')).toEqual([
+                g1Impostor,
+            ]);
+
+            playAgain('room-history-persist', 'host1');
+            expect(getLastImpostorIds('room-history-persist')).toEqual([
+                g1Impostor,
+            ]);
+
+            startGame('room-history-persist', 'host1');
+            const g2Impostor = room.impostorId!;
+            expect(getLastImpostorIds('room-history-persist')).toEqual([
+                g2Impostor,
+            ]);
+        });
+
         it('should heavily reduce (weight) repeating the previous game impostor when preventRepeatImpostors is true', () => {
             const room = createRoom('room-weighted-repeat', 'host1');
             ['host1', 'p2', 'p3', 'p4'].forEach((id) =>
                 joinRoom('room-weighted-repeat', createPlayer(id, id))
             );
 
-            let repeatCount = 0;
+            let consecutiveRepeats = 0;
             const TOTAL_RUNS = 1000;
 
             for (let i = 0; i < TOTAL_RUNS; i++) {
-                room.lastImpostorIds = ['host1'];
                 startGame('room-weighted-repeat', 'host1');
-                if (room.impostorId === 'host1') {
-                    repeatCount++;
+                const firstImp = room.impostorId!;
+                playAgain('room-weighted-repeat', 'host1');
+
+                startGame('room-weighted-repeat', 'host1');
+                if (room.impostorId === firstImp) {
+                    consecutiveRepeats++;
                 }
                 playAgain('room-weighted-repeat', 'host1');
             }
 
-            // Unweighted expectation: 250 / 1000 (25%)
-            // Weighted (0.2 vs 3.0) expectation: 62.5 / 1000 (6.25%)
-            expect(repeatCount).toBeLessThan(120);
-            expect(repeatCount).toBeGreaterThan(0);
+            // Unweighted (pure random) expectation: ~250 repeats out of 1000 (25%)
+            // Weighted (0.2 vs 1+1+1) expectation: 0.2 / 3.2 = 6.25% (~62.5 repeats out of 1000)
+            expect(consecutiveRepeats).toBeLessThan(120);
+            expect(consecutiveRepeats).toBeGreaterThan(0);
         });
 
-        it('should allow repeating impostor with normal probability when preventRepeatImpostors is false', () => {
+        it('should allow repeating impostor with normal uniform probability when preventRepeatImpostors is false', () => {
             const room = createRoom('room-allow-repeat', 'host1');
             ['host1', 'p2', 'p3', 'p4'].forEach((id) =>
                 joinRoom('room-allow-repeat', createPlayer(id, id))
@@ -406,10 +436,24 @@ describe('gameManager', () => {
                 preventRepeatImpostors: false,
             });
 
-            expect(room.gameOptions.preventRepeatImpostors).toBe(false);
+            let consecutiveRepeats = 0;
+            const TOTAL_RUNS = 1000;
 
-            startGame('room-allow-repeat', 'host1');
-            expect(room.impostorId).not.toBeNull();
+            for (let i = 0; i < TOTAL_RUNS; i++) {
+                startGame('room-allow-repeat', 'host1');
+                const firstImp = room.impostorId!;
+                playAgain('room-allow-repeat', 'host1');
+
+                startGame('room-allow-repeat', 'host1');
+                if (room.impostorId === firstImp) {
+                    consecutiveRepeats++;
+                }
+                playAgain('room-allow-repeat', 'host1');
+            }
+
+            // Pure uniform random expectation: 25% (~250 out of 1000). Expect between 190 and 310.
+            expect(consecutiveRepeats).toBeGreaterThan(190);
+            expect(consecutiveRepeats).toBeLessThan(310);
         });
     });
 
