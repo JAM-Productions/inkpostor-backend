@@ -13,6 +13,7 @@ import {
     DEFAULT_GAME_MODE,
     DEFAULT_GAME_OPTIONS,
     GAME_MODES,
+    getMaxImpostors,
     isPlayerWordMode,
     isSpokenMode,
     MAX_CUSTOM_WORD_LENGTH,
@@ -21,6 +22,7 @@ import {
     MAX_NUM_PLAYERS_PER_ROOM,
     MIN_CUSTOM_WORD_LENGTH,
     MIN_IMPOSTOR_GUESSES,
+    MIN_IMPOSTORS,
     REPEAT_IMPOSTOR_WEIGHT,
     SPECIAL_CATEGORY,
     TURN_ORDER_MODES,
@@ -67,6 +69,31 @@ export function resolveGameEnd(room: GameRoom): boolean {
 
     room.gameEnded = isEnded;
     return isEnded;
+}
+
+// The count the host saved outlives the players it was chosen for: two impostors
+// picked for five stop fitting as soon as one of them leaves. startGame cuts it
+// anyway, so nothing unfair is ever dealt, but until then the room hands every
+// client a number it would not honour — so it is cut where the player list
+// shrinks instead, and the clients see the real one.
+function clampImpostorCountToPlayers(room: GameRoom): void {
+    const maxImpostors = getMaxImpostors(room.players.length);
+    if (room.hostGameOptions.impostorCount <= maxImpostors) return;
+
+    room.hostGameOptions = {
+        ...room.hostGameOptions,
+        impostorCount: maxImpostors,
+        // A lone impostor has no teammates to be shown, exactly as sanitising a
+        // host's own update treats it.
+        revealImpostorTeammates:
+            maxImpostors > MIN_IMPOSTORS
+                ? room.hostGameOptions.revealImpostorTeammates
+                : DEFAULT_GAME_OPTIONS.revealImpostorTeammates,
+    };
+    room.gameOptions = applyModeLockedOptions(
+        room.hostGameOptions,
+        room.gameMode
+    );
 }
 
 // Some modes take an option over: the value they impose is forced and the host
@@ -243,6 +270,7 @@ export function leaveRoom(roomId: string, playerId: string): GameRoom | null {
 
     if (room.phase === 'LOBBY') {
         room.players.splice(playerIndex, 1);
+        clampImpostorCountToPlayers(room);
         return room;
     }
 
@@ -356,10 +384,10 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
         return null;
 
     // Pick Impostors
-    const maxImpostors = Math.max(1, Math.floor((room.players.length - 1) / 2));
+    const maxImpostors = getMaxImpostors(room.players.length);
     const targetCount = Math.min(
         maxImpostors,
-        Math.max(1, room.gameOptions.impostorCount ?? 1)
+        Math.max(MIN_IMPOSTORS, room.gameOptions.impostorCount ?? MIN_IMPOSTORS)
     );
     let pickedPlayers: Player[] = [];
     const prevImpostors = lastImpostors[roomId];
@@ -957,6 +985,7 @@ export function kickPlayer(
     const playerIndex = room.players.findIndex((p) => p.id === playerId);
     if (playerIndex === -1) return null;
     room.players.splice(playerIndex, 1);
+    clampImpostorCountToPlayers(room);
     // Block this player from rejoining the same room
     if (!kickedFromRoom[roomId]) kickedFromRoom[roomId] = new Set();
     kickedFromRoom[roomId].add(playerId);
@@ -972,6 +1001,9 @@ function executeKick(room: GameRoom, playerId: string) {
     const previousTurnIndex = room.turnIndex;
 
     room.players.splice(playerIndex, 1);
+    // The current game keeps the impostors it dealt; this is for the lobby it
+    // goes back to, which is now one player smaller.
+    clampImpostorCountToPlayers(room);
     room.turnOrder = room.turnOrder.filter((id) => id !== playerId);
     delete room.votes[playerId];
     Object.keys(room.votes).forEach((voterId) => {
