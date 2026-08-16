@@ -43,10 +43,7 @@ export function isPlayerWordMode(mode: GameMode): boolean {
 // Whether the round goes through the VOTING phase. The modes that draw always
 // do; a spoken mode only does it when the host turned the virtual voting on,
 // since the whole point of the in-person game is voting at the table.
-export function usesVotingPhase(
-    mode: GameMode,
-    options: GameOptions
-): boolean {
+export function usesVotingPhase(mode: GameMode, options: GameOptions): boolean {
     return !isSpokenMode(mode) || options.virtualVotingEnabled;
 }
 export const TURN_ORDER_MODES = [

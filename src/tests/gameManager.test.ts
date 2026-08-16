@@ -1399,7 +1399,9 @@ describe('gameManager', () => {
         it('should reject a reveal wherever the voting phase is played', () => {
             const room = setupOrderScreen('virtual-voting-on-reveal');
             room.gameOptions.virtualVotingEnabled = true;
-            expect(revealResults('virtual-voting-on-reveal', 'host1')).toBeNull();
+            expect(
+                revealResults('virtual-voting-on-reveal', 'host1')
+            ).toBeNull();
             expect(room.phase).toBe('ORDER_INFO');
 
             // And a mode that draws never gets there in the first place
@@ -2266,7 +2268,9 @@ describe('gameManager', () => {
             expect(result!.gameEnded).toBe(true);
             expect(result!.ejectedId).toBe('p2');
             expect(result!.players.find((p) => p.id === 'p2')).toBeUndefined();
-            expect(result!.kickedOutPlayers).toEqual([{ id: 'p2', name: 'p2' }]);
+            expect(result!.kickedOutPlayers).toEqual([
+                { id: 'p2', name: 'p2' },
+            ]);
 
             // ...and a fresh game starts without that record
             playAgain('room-votekick-impostor', 'host1');
