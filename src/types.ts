@@ -80,6 +80,7 @@ export interface GameOptions {
     hideHint: boolean;
     turnOrderMode: TurnOrderMode;
     preventRepeatImpostors: boolean;
+    virtualVotingEnabled: boolean;
 }
 
 export interface GameRoom {
@@ -100,6 +101,8 @@ export interface GameRoom {
     currentRound: number;
     ejectedId: string | null;
     gameEnded: boolean;
+    endedByHost: boolean;
+    kickedOutPlayers: { id: string; name: string }[];
     // What the rules actually read: the host's choices with the current mode's
     // locks applied on top (see MODE_LOCKED_OPTIONS).
     gameOptions: GameOptions;
@@ -115,6 +118,7 @@ export interface GameRoom {
     // Impostor guess feature
     impostorGuessesUsed: number; // In-phase guesses spent (DRAWING/VOTING), persists across rounds
     impostorGuessedCorrectly: boolean; // True if the impostor won by guessing the word
+    guessingImpostorId: string | null;
     // True if the impostor lost by spending the whole pool (impostorLosesWhenOutOfGuesses).
     // The clients cannot infer this one: it ends the game without an ejection.
     impostorOutOfGuesses: boolean;

@@ -30,6 +30,7 @@ import {
     submitCustomWord,
     confirmNewWord,
     confirmOrder,
+    revealResults,
     getImpostorIds,
 } from './gameManager';
 import { GameRoom, Player, StrokeData, UserPayload } from './types';
@@ -302,6 +303,16 @@ io.on('connection', (socket: Socket) => {
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = confirmOrder(roomId, user.userId);
+        if (room) {
+            broadcastGameState(roomId);
+        }
+    });
+
+    socket.on('revealResults', () => {
+        const user = socket.user;
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        const room = revealResults(roomId, user.userId);
         if (room) {
             broadcastGameState(roomId);
         }
@@ -584,6 +595,7 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
         ...withoutCustomWords(room),
         impostorId: null, // Hidden
         impostorIds: [], // Hidden
+        guessingImpostorId: null,
         secretWord: null, // Hidden
         ejectedWasImpostor,
         remainingImpostorCount,

@@ -26,6 +26,7 @@ import {
     REPEAT_IMPOSTOR_WEIGHT,
     SPECIAL_CATEGORY,
     TURN_ORDER_MODES,
+    usesVotingPhase,
 } from './constants';
 
 const rooms: Record<string, GameRoom> = {};
@@ -181,6 +182,9 @@ function sanitizeGameOptionsUpdate(
     if (typeof options.preventRepeatImpostors === 'boolean') {
         nextOptions.preventRepeatImpostors = options.preventRepeatImpostors;
     }
+    if (typeof options.virtualVotingEnabled === 'boolean') {
+        nextOptions.virtualVotingEnabled = options.virtualVotingEnabled;
+    }
 
     if (!nextOptions.impostorGuessEnabled) {
         nextOptions.impostorLosesWhenOutOfGuesses =
@@ -215,12 +219,15 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         currentRound: 1,
         ejectedId: null,
         gameEnded: false,
+        endedByHost: false,
+        kickedOutPlayers: [],
         gameOptions: { ...DEFAULT_GAME_OPTIONS },
         hostGameOptions: { ...DEFAULT_GAME_OPTIONS },
         gameMode: DEFAULT_GAME_MODE,
         usedWords: [],
         impostorGuessesUsed: 0,
         impostorGuessedCorrectly: false,
+        guessingImpostorId: null,
         impostorOutOfGuesses: false,
     };
     rooms[roomId] = newRoom;
@@ -432,9 +439,12 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     });
     room.ejectedId = null;
     room.gameEnded = false;
+    room.endedByHost = false;
+    room.kickedOutPlayers = [];
     room.usedWords = [];
     room.impostorGuessesUsed = 0;
     room.impostorGuessedCorrectly = false;
+    room.guessingImpostorId = null;
     room.impostorOutOfGuesses = false;
 
     if (isPlayerWordMode(room.gameMode)) {
@@ -609,6 +619,7 @@ export function proceedToDrawing(
 // not start behind the back of someone who is reconnecting (the host can always
 // end the game). Ejected players may watch, but are not waited for.
 function checkAllConfirmedOrder(room: GameRoom) {
+    if (!usesVotingPhase(room.gameMode, room.gameOptions)) return;
     const allConfirmed = room.players.every(
         (p) => p.isEjected || p.hasConfirmedOrder
     );
@@ -629,6 +640,21 @@ export function confirmOrder(
     if (!player || player.isEjected) return null;
     player.hasConfirmedOrder = true;
     checkAllConfirmedOrder(room);
+    return room;
+}
+
+export function revealResults(
+    roomId: string,
+    playerId: string
+): GameRoom | null {
+    const room = rooms[roomId];
+    if (!room || room.hostId !== playerId) return null;
+    if (room.phase !== 'ORDER_INFO') return null;
+    if (usesVotingPhase(room.gameMode, room.gameOptions)) return null;
+    room.ejectedId = null;
+    room.phase = 'RESULTS';
+    room.gameEnded = true;
+    room.endedByHost = true;
     return room;
 }
 
@@ -791,6 +817,7 @@ export function submitImpostorGuess(
     ) {
         // Correct guess: the impostor wins and the game ends immediately.
         room.impostorGuessedCorrectly = true;
+        room.guessingImpostorId = playerId;
         room.phase = 'RESULTS';
         room.gameEnded = true;
         return room;
@@ -808,6 +835,7 @@ export function submitImpostorGuess(
         // The host made the pool lethal: spending it loses the game on the spot,
         // with no ejection involved (hence the flag — the clients cannot tell).
         room.impostorOutOfGuesses = true;
+        room.guessingImpostorId = playerId;
         room.phase = 'RESULTS';
         room.gameEnded = true;
     }
@@ -857,9 +885,12 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     });
     room.ejectedId = null;
     room.gameEnded = false;
+    room.endedByHost = false;
+    room.kickedOutPlayers = [];
     room.usedWords = [];
     room.impostorGuessesUsed = 0;
     room.impostorGuessedCorrectly = false;
+    room.guessingImpostorId = null;
     room.impostorOutOfGuesses = false;
     // gameMode is a lobby setting like gameOptions, so it survives Play Again.
     // Clear the lobby-kick blocklist for a fresh game
@@ -955,8 +986,10 @@ export function nextRound(roomId: string, playerId: string): GameRoom | null {
 export function endGame(roomId: string, playerId: string): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.hostId !== playerId) return null;
+    if (room.phase === 'LOBBY') return null;
     room.phase = 'RESULTS';
     room.gameEnded = true;
+    room.endedByHost = true;
     return room;
 }
 
@@ -999,8 +1032,13 @@ function executeKick(room: GameRoom, playerId: string) {
     const wasCurrentTurn = room.currentTurnPlayerId === playerId;
     const impostorIds = getImpostorIds(room);
     const previousTurnIndex = room.turnIndex;
+    const kicked = room.players[playerIndex];
 
     room.players.splice(playerIndex, 1);
+    // Gone from the room for the rest of the game, but the result screen may
+    // still have to name them: a kicked impostor is revealed at the end like
+    // any other, and a kick that ends the game names its target on the spot.
+    room.kickedOutPlayers.push({ id: kicked.id, name: kicked.name });
     // The current game keeps the impostors it dealt; this is for the lobby it
     // goes back to, which is now one player smaller.
     clampImpostorCountToPlayers(room);
@@ -1018,6 +1056,9 @@ function executeKick(room: GameRoom, playerId: string) {
         );
     });
 
+    // Kicking someone out of the game ends it in two ways, and both leave the
+    // result screen talking about a player who is no longer in the room — very
+    // often the impostor themselves. Keep who they were.
     const activePlayers = room.players.filter((p) => p.isConnected);
     if (activePlayers.length < 3) {
         room.phase = 'RESULTS';

@@ -505,6 +505,8 @@ describe('Server API and Socket Integration Tests', () => {
             await roomCreated;
             const room = getRoom(roomId);
             expect(room).toBeDefined();
+            // A game in progress: the lobby has nothing to end
+            room!.phase = 'DRAWING';
 
             const endGameEvent = waitForEvent<GameRoom>(
                 hostSocket,
@@ -513,6 +515,7 @@ describe('Server API and Socket Integration Tests', () => {
             hostSocket.emit('endGame');
             const state = await endGameEvent;
             expect(state.gameEnded).toBe(true);
+            expect(state.endedByHost).toBe(true);
 
             hostSocket.disconnect();
         }, 15_000);
@@ -604,6 +607,7 @@ describe('Server API and Socket Integration Tests', () => {
                 hideHint: true,
                 turnOrderMode: 'RANDOM_STARTER',
                 preventRepeatImpostors: true,
+                virtualVotingEnabled: true,
             };
 
             hostSocket.emit('updateGameOptions', updatedOptions);
@@ -1051,7 +1055,10 @@ describe('Server API and Socket Integration Tests', () => {
         const setupLobby = async (
             roomId: string,
             idSuffix: string,
-            gameMode: string = 'ORIGINAL'
+            gameMode: string = 'ORIGINAL',
+            // Off by default in the game, but these flows are about the VOTING
+            // phase, which only exists in a spoken mode when it is turned on.
+            virtualVotingEnabled: boolean = true
         ) => {
             const userIds = [0, 1, 2].map(
                 (n) => `00000000-0000-4000-8000-0000000000${idSuffix}${n}`
@@ -1076,7 +1083,10 @@ describe('Server API and Socket Integration Tests', () => {
                 await joined;
             }
 
-            hostSocket.emit('updateGameOptions', { gameMode });
+            hostSocket.emit('updateGameOptions', {
+                gameMode,
+                virtualVotingEnabled,
+            });
             await new Promise((resolve) => setTimeout(resolve, 100));
 
             return { sockets, userIds, hostSocket };
@@ -1205,6 +1215,56 @@ describe('Server API and Socket Integration Tests', () => {
                 await new Promise((resolve) => setTimeout(resolve, 50));
             }
             expect(getRoom(roomId)!.phase).toBe('ORDER_INFO');
+
+            sockets.forEach((s) => s.disconnect());
+        }, 20_000);
+
+        it('should end the game from ORDER_INFO when the host reveals the results', async () => {
+            const roomId = 'original-reveal-room';
+            // Virtual voting off: the default, and the only setup where the
+            // reveal button exists.
+            const { sockets, hostSocket } = await setupLobby(
+                roomId,
+                '8',
+                'ORIGINAL',
+                false
+            );
+
+            const roles = sockets.map((s) =>
+                waitForEvent<RoleAssignment>(s, 'roleAssignment')
+            );
+            hostSocket.emit('startGame');
+            await Promise.all(roles);
+
+            for (const s of sockets) {
+                s.emit('proceedToDrawing');
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(getRoom(roomId)!.phase).toBe('ORDER_INFO');
+
+            // Confirming resolves nothing, and a guest cannot reveal
+            for (const s of sockets) {
+                s.emit('confirmOrder');
+            }
+            sockets[1].emit('revealResults');
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            expect(getRoom(roomId)!.phase).toBe('ORDER_INFO');
+
+            const results = sockets.map((s) =>
+                waitForEvent<GameRoom>(s, 'gameStateUpdate')
+            );
+            hostSocket.emit('revealResults');
+            const states = await Promise.all(results);
+
+            // The game is over, so every player is handed the impostors and the
+            // word — that reveal is the whole point of the screen.
+            states.forEach((state) => {
+                expect(state.phase).toBe('RESULTS');
+                expect(state.gameEnded).toBe(true);
+                expect(state.ejectedId).toBeNull();
+                expect(state.impostorIds.length).toBeGreaterThan(0);
+                expect(state.secretWord).not.toBeNull();
+            });
 
             sockets.forEach((s) => s.disconnect());
         }, 20_000);
