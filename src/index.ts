@@ -221,6 +221,9 @@ io.on('connection', (socket: Socket) => {
             socket.join(roomId);
             socketToRoom[socket.id] = roomId;
             broadcastGameState(roomId);
+            // Whoever just walked in has an empty canvas, and state updates no
+            // longer carry the drawing. A mid-game reconnect depends on this.
+            emitCanvasSync(socket, roomId);
 
             // If the player reconnected into an in-progress game, re-send their
             // private role so they recover amIImpostor / secretWord / category
@@ -318,15 +321,26 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('drawStroke', (stroke: StrokeData) => {
+    socket.on('drawStroke', (stroke: StrokeData | StrokeData[]) => {
         const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
         const room = addStroke(roomId, user.userId, stroke);
         if (room) {
-            // Broadcast stroke to others instantly for smooth drawing
+            // Broadcast stroke to others instantly for smooth drawing. The
+            // payload is forwarded in the shape it arrived in — a batch from a
+            // current client, a single point from an older one — and the client
+            // handler accepts both.
             socket.to(roomId).emit('strokeUpdate', stroke);
         }
+    });
+
+    // A client that just joined, reconnected, or noticed it had fallen behind
+    // asks for the drawing in full. This is the only thing that ever sends it.
+    socket.on('requestCanvasSync', () => {
+        const roomId = socketToRoom[socket.id];
+        if (!roomId) return;
+        emitCanvasSync(socket, roomId);
     });
 
     socket.on('undoStroke', () => {
@@ -577,11 +591,28 @@ function withoutCustomWords(room: GameRoom) {
     };
 }
 
+// The drawing is the largest thing a room holds, and it does not belong in a
+// state update: clients build it from `strokeUpdate` as it happens and pull the
+// whole thing with `canvasSync` when they need to. Shipping it on every update
+// meant an endTurn in a full room re-sent the entire drawing once per player.
+// What stays is the epoch, so a client hears about a wipe, and the count, so it
+// can tell it has fallen behind.
+function withoutCanvasStrokes<T extends { canvasStrokes: StrokeData[] }>(
+    state: T
+) {
+    const { canvasStrokes, ...rest } = state;
+    return { ...rest, canvasStrokeCount: canvasStrokes.length };
+}
+
+function forBroadcast(room: GameRoom) {
+    return withoutCanvasStrokes(withoutCustomWords(room));
+}
+
 // Helper to hide secrets from general state updates
 function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     if (!room) return null;
     // If game is over, reveal everything (except the unused custom words)
-    if (room.gameEnded) return withoutCustomWords(room);
+    if (room.gameEnded) return forBroadcast(room);
 
     const impostorIds = getImpostorIds(room);
     const ejectedWasImpostor = room.ejectedId
@@ -592,7 +623,7 @@ function getSanitizedRoomState(room: ReturnType<typeof getRoom>) {
     ).length;
 
     return {
-        ...withoutCustomWords(room),
+        ...forBroadcast(room),
         impostorId: null, // Hidden
         impostorIds: [], // Hidden
         guessingImpostorId: null,
@@ -730,6 +761,17 @@ function broadcastGameState(roomId: string) {
     if (!room) return;
     room.players.forEach((p) => {
         emitGameStateToPlayer(roomId, p.id);
+    });
+}
+
+// Hands one socket the whole drawing plus the epoch it belongs to. Sent when a
+// player joins and whenever one asks, and nowhere else.
+function emitCanvasSync(socket: Socket, roomId: string) {
+    const room = getRoom(roomId);
+    if (!room) return;
+    socket.emit('canvasSync', {
+        epoch: room.canvasEpoch,
+        strokes: room.canvasStrokes,
     });
 }
 

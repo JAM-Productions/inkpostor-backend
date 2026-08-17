@@ -32,6 +32,7 @@ import {
     DEFAULT_IMPOSTOR_GUESSES,
     DEFAULT_ROUND_TIME,
     DEFAULT_TURN_ORDER_MODE,
+    MAX_CANVAS_STROKES,
     MAX_IMPOSTOR_GUESSES,
     MAX_NUM_PLAYERS_PER_ROOM,
     SPECIAL_CATEGORY,
@@ -1681,6 +1682,107 @@ describe('gameManager', () => {
             // Clear invalid player
             const result4 = undoStroke('room-stroke', 'p2');
             expect(result4).toBeNull();
+        });
+
+        describe('batching, ceiling and the wipe epoch', () => {
+            const drawingRoom = (roomId: string) => {
+                const room = createRoom(roomId, 'p1');
+                joinRoom(roomId, {
+                    id: 'p1',
+                    name: 'P1',
+                    isConnected: true,
+                    score: 0,
+                    hasStartedEmergencyVoting: false,
+                });
+                room.phase = 'DRAWING';
+                room.currentTurnPlayerId = 'p1';
+                return room;
+            };
+
+            const point = (x: number, isNewStroke = false): StrokeData => ({
+                x,
+                y: x,
+                color: '#000',
+                isNewStroke,
+            });
+
+            it('appends every point of a batch', () => {
+                drawingRoom('room-batch');
+
+                const result = addStroke('room-batch', 'p1', [
+                    point(0, true),
+                    point(1),
+                    point(2),
+                ]);
+
+                expect(result!.canvasStrokes).toEqual([
+                    point(0, true),
+                    point(1),
+                    point(2),
+                ]);
+            });
+
+            it('still accepts a single point, as an older client sends it', () => {
+                drawingRoom('room-single');
+
+                addStroke('room-single', 'p1', point(0, true));
+
+                expect(getRoom('room-single')!.canvasStrokes).toEqual([
+                    point(0, true),
+                ]);
+            });
+
+            it('ignores an empty batch', () => {
+                drawingRoom('room-empty-batch');
+                expect(addStroke('room-empty-batch', 'p1', [])).toBeNull();
+            });
+
+            it('drops the oldest points once the ceiling is reached', () => {
+                const room = drawingRoom('room-ceiling');
+                room.canvasStrokes = Array.from(
+                    { length: MAX_CANVAS_STROKES },
+                    (_, i) => point(i)
+                );
+
+                addStroke('room-ceiling', 'p1', [point(-1), point(-2)]);
+
+                expect(room.canvasStrokes).toHaveLength(MAX_CANVAS_STROKES);
+                // The two oldest made room for the two that arrived.
+                expect(room.canvasStrokes[0]).toEqual(point(2));
+                expect(room.canvasStrokes.at(-1)).toEqual(point(-2));
+            });
+
+            it('bumps the epoch when a game starts, so clients wipe too', () => {
+                // Stays in the lobby until everyone is in: a game needs three.
+                const room = createRoom('room-epoch-start', 'p1');
+                ['p1', 'p2', 'p3'].forEach((id) =>
+                    joinRoom('room-epoch-start', {
+                        id,
+                        name: id.toUpperCase(),
+                        isConnected: true,
+                        score: 0,
+                        hasStartedEmergencyVoting: false,
+                    })
+                );
+                room.canvasStrokes = [point(0, true)];
+                const before = room.canvasEpoch;
+
+                expect(startGame('room-epoch-start', 'p1')).not.toBeNull();
+
+                expect(room.canvasEpoch).toBeGreaterThan(before);
+                expect(room.canvasStrokes).toEqual([]);
+            });
+
+            it('leaves the epoch alone on undo, which travels on its own event', () => {
+                const room = drawingRoom('room-epoch-undo');
+                addStroke('room-epoch-undo', 'p1', [point(0, true), point(1)]);
+                const before = room.canvasEpoch;
+
+                undoStroke('room-epoch-undo', 'p1');
+
+                expect(room.canvasStrokes).toEqual([]);
+                expect(room.canvasEpoch).toBe(before);
+            });
         });
 
         it('should return null for add/clear if wrong phase or no room', () => {

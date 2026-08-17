@@ -490,6 +490,175 @@ describe('Server API and Socket Integration Tests', () => {
         }, 15_000);
     });
 
+    describe('Canvas sync protocol', () => {
+        const hostRoom = async (
+            roomId: string,
+            name: string,
+            userId: string
+        ) => {
+            const token = await getToken(name, userId);
+            const socket = await connectSocket(token);
+            const created = waitForEvent<GameRoom>(socket, 'gameStateUpdate');
+            socket.emit('createRoom', { roomId });
+            await created;
+            return { socket, userId };
+        };
+
+        // A player can only walk into a room while it is still in the lobby, so
+        // everyone gets in first and the phase is moved on afterwards.
+        const startDrawing = (roomId: string, drawerId: string) => {
+            const room = getRoom(roomId)!;
+            room.phase = 'DRAWING';
+            room.currentTurnPlayerId = drawerId;
+            return room;
+        };
+
+        const addGuest = async (
+            roomId: string,
+            name: string,
+            userId: string
+        ) => {
+            const token = await getToken(name, userId);
+            const socket = await connectSocket(token);
+            const joined = waitForEvent(socket, 'canvasSync');
+            socket.emit('joinRoom', { roomId });
+            await joined;
+            return socket;
+        };
+
+        const drawingRoom = async (
+            roomId: string,
+            name: string,
+            userId: string
+        ) => {
+            const { socket } = await hostRoom(roomId, name, userId);
+            const room = startDrawing(roomId, userId);
+            return { socket, room };
+        };
+
+        it('keeps the drawing out of state updates, sending only epoch and count', async () => {
+            const { socket, room } = await drawingRoom(
+                'canvas-wire-room',
+                'WireHost',
+                '00000000-0000-4000-8000-0000000000a1'
+            );
+
+            socket.emit('drawStroke', [
+                { x: 1, y: 1, color: '#000', isNewStroke: true },
+                { x: 2, y: 2, color: '#000', isNewStroke: false },
+            ]);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            const update = waitForEvent<any>(socket, 'gameStateUpdate');
+            socket.emit('startEmergencyVoting');
+            const state = await update;
+
+            expect(state).not.toHaveProperty('canvasStrokes');
+            expect(state.canvasStrokeCount).toBe(2);
+            expect(state.canvasEpoch).toBe(room.canvasEpoch);
+
+            socket.disconnect();
+        }, 15_000);
+
+        it('sends the whole drawing to a player rejoining mid-game', async () => {
+            const roomId = 'canvas-join-sync-room';
+            const { socket: host, userId: hostId } = await hostRoom(
+                roomId,
+                'SyncHost',
+                '00000000-0000-4000-8000-0000000000a2'
+            );
+            const guest = await addGuest(
+                roomId,
+                'SyncGuest',
+                '00000000-0000-4000-8000-0000000000a3'
+            );
+            startDrawing(roomId, hostId);
+
+            const strokes: StrokeData[] = [
+                { x: 5, y: 5, color: '#f00', isNewStroke: true },
+                { x: 6, y: 6, color: '#f00', isNewStroke: false },
+            ];
+            host.emit('drawStroke', strokes);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            // What a reload looks like: the same identity walks back in and has
+            // to be handed the drawing, because no state update carries it.
+            const synced = waitForEvent<{
+                epoch: number;
+                strokes: StrokeData[];
+            }>(guest, 'canvasSync');
+            guest.emit('joinRoom', { roomId });
+            const payload = await synced;
+
+            expect(payload.strokes).toEqual(strokes);
+            expect(payload.epoch).toBe(getRoom(roomId)!.canvasEpoch);
+
+            host.disconnect();
+            guest.disconnect();
+        }, 15_000);
+
+        it('re-sends the drawing on request, for a client that fell behind', async () => {
+            const roomId = 'canvas-resync-room';
+            const { socket } = await drawingRoom(
+                roomId,
+                'ResyncHost',
+                '00000000-0000-4000-8000-0000000000a4'
+            );
+
+            socket.emit('drawStroke', {
+                x: 9,
+                y: 9,
+                color: '#00f',
+                isNewStroke: true,
+            });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            const synced = waitForEvent<{
+                epoch: number;
+                strokes: StrokeData[];
+            }>(socket, 'canvasSync');
+            socket.emit('requestCanvasSync');
+            const payload = await synced;
+
+            expect(payload.strokes).toHaveLength(1);
+            expect(payload.strokes[0].x).toBe(9);
+
+            socket.disconnect();
+        }, 15_000);
+
+        it('forwards a batch to the other players in one message', async () => {
+            const roomId = 'canvas-batch-room';
+            const { socket: host, userId: hostId } = await hostRoom(
+                roomId,
+                'BatchHost',
+                '00000000-0000-4000-8000-0000000000a5'
+            );
+            const guest = await addGuest(
+                roomId,
+                'BatchGuest',
+                '00000000-0000-4000-8000-0000000000a6'
+            );
+            startDrawing(roomId, hostId);
+
+            const batch: StrokeData[] = [
+                { x: 1, y: 1, color: '#0f0', isNewStroke: true },
+                { x: 2, y: 2, color: '#0f0', isNewStroke: false },
+                { x: 3, y: 3, color: '#0f0', isNewStroke: false },
+            ];
+            const forwarded = waitForEvent<StrokeData | StrokeData[]>(
+                guest,
+                'strokeUpdate'
+            );
+            host.emit('drawStroke', batch);
+
+            expect(await forwarded).toEqual(batch);
+            expect(getRoom(roomId)!.canvasStrokes).toEqual(batch);
+
+            host.disconnect();
+            guest.disconnect();
+        }, 15_000);
+    });
+
     describe('Socket End Game Flow', () => {
         it('endGame should properly set gameEnded flag to true', async () => {
             const roomId = 'end-game-flow-room';

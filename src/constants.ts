@@ -1,6 +1,11 @@
 import { GameMode, GameOptions, TurnOrderMode } from './types';
 
 export const MAX_NUM_PLAYERS_PER_ROOM = 10;
+// Ceiling on the points one drawing may hold. The ink budget already bounds a
+// turn, but `unlimitedInk` removes it, and nothing else stops a room from
+// growing without limit for as long as it stays alive. Oldest points go first:
+// losing the start of a drawing beats refusing to draw.
+export const MAX_CANVAS_STROKES = 20000;
 export const DEFAULT_ROUND_TIME = 20;
 export const ALLOWED_ROUND_TIMES = [20, 25, 30, 35, 40] as const;
 export const MIN_IMPOSTOR_GUESSES = 1;

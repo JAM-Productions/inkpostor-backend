@@ -16,6 +16,7 @@ import {
     getMaxImpostors,
     isPlayerWordMode,
     isSpokenMode,
+    MAX_CANVAS_STROKES,
     MAX_CUSTOM_WORD_LENGTH,
     MODE_LOCKED_OPTIONS,
     MAX_IMPOSTOR_GUESSES,
@@ -216,6 +217,7 @@ export function createRoom(roomId: string, hostId: string): GameRoom {
         votes: {},
         kickVotes: {},
         canvasStrokes: [],
+        canvasEpoch: 0,
         currentRound: 1,
         ejectedId: null,
         gameEnded: false,
@@ -425,7 +427,7 @@ export function startGame(roomId: string, playerId: string): GameRoom | null {
     // Reset state
     room.votes = {};
     room.kickVotes = {};
-    room.canvasStrokes = [];
+    resetCanvas(room);
     room.players.forEach((p) => {
         p.hasVoted = false;
         p.isEjected = false;
@@ -546,10 +548,21 @@ export function nextTurn(roomId: string, playerId: string): GameRoom | null {
     return room;
 }
 
+/**
+ * Wipes the canvas and tells clients to do the same.
+ *
+ * Every reset goes through here so the epoch can never drift from the strokes:
+ * clients only learn about a wipe from that number.
+ */
+export function resetCanvas(room: GameRoom): void {
+    room.canvasStrokes = [];
+    room.canvasEpoch += 1;
+}
+
 export function addStroke(
     roomId: string,
     playerId: string,
-    stroke: StrokeData
+    stroke: StrokeData | StrokeData[]
 ): GameRoom | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
@@ -557,7 +570,22 @@ export function addStroke(
     const player = room.players.find((p) => p.id === playerId);
     if (!player || player.isEjected) return null;
 
-    room.canvasStrokes.push(stroke);
+    // Clients coalesce a frame's worth of pointer moves into one message, but an
+    // older one still sends a point at a time.
+    if (Array.isArray(stroke)) {
+        if (stroke.length === 0) return null;
+        room.canvasStrokes.push(...stroke);
+    } else {
+        room.canvasStrokes.push(stroke);
+    }
+
+    if (room.canvasStrokes.length > MAX_CANVAS_STROKES) {
+        room.canvasStrokes.splice(
+            0,
+            room.canvasStrokes.length - MAX_CANVAS_STROKES
+        );
+    }
+
     return room;
 }
 
@@ -871,7 +899,7 @@ export function playAgain(roomId: string, playerId: string): GameRoom | null {
     room.turnIndex = 0;
     room.votes = {};
     room.kickVotes = {};
-    room.canvasStrokes = [];
+    resetCanvas(room);
     room.players.forEach((p) => {
         p.hasVoted = false;
         p.isEjected = false;
@@ -938,7 +966,7 @@ function checkAllConfirmedNewRound(room: GameRoom) {
     });
     room.ejectedId = null;
     if (room.gameOptions.clearCanvasEachRound) {
-        room.canvasStrokes = [];
+        resetCanvas(room);
     }
 
     if (room.gameMode === 'HOT_WORD') {
