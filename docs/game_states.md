@@ -29,6 +29,7 @@ mode means listing it there, not hunting down every comparison:
 |---|---|---|
 | `isSpokenMode` | `ORIGINAL`, `ORIGINAL_CHAOS` | The round opens on `ORDER_INFO` instead of `DRAWING`, and `RANDOM_ORDER` redraws the order each round |
 | `isPlayerWordMode` | `CUSTOM_WORD`, `ORIGINAL_CHAOS` | The game opens on `WORD_SELECTION`, and the word is sent verbatim instead of through the translation table |
+| `usesVotingPhase` | every mode that draws, plus a spoken mode with `virtualVotingEnabled` | Whether `VOTING` is played at all. Off in a spoken mode, `ORDER_INFO` is the whole round and only the host's `revealResults` ends it |
 
 Some modes take an option over. While such a mode is selected the value is
 forced and the host cannot change it — `updateGameOptions` re-applies the table
@@ -51,7 +52,19 @@ moment the host picks a mode that leaves it alone, and the options modal edits
 
 A spoken mode locks the drawing options *away* rather than showing them with a
 padlock: the client hides those sections entirely and renders `turnOrderMode`
-instead. `hideHint` and `impostorCount` are available in **every** mode.
+and `virtualVotingEnabled` instead. `hideHint` and `impostorCount` are available
+in **every** mode.
+
+### Virtual Voting (`virtualVotingEnabled`, spoken modes only)
+
+Off by default. Like `turnOrderMode`, no mode takes it over — the modes that draw
+simply never read it (`usesVotingPhase`), so it survives a detour through one of
+them untouched.
+
+| Value | How a spoken round ends |
+|---|---|
+| `false` (default) | The table votes out loud. `ORDER_INFO` is the whole round: confirmations resolve nothing and `VOTING` is unreachable. The **host** ends the game with `revealResults`, which goes straight to `RESULTS` with `gameEnded: true` and no ejection — the client shows the list of impostors instead of a verdict. |
+| `true` | The round runs `ORDER_INFO → VOTING` exactly like a drawing mode, with ejections, several rounds and a winner. |
 
 ### Extra Inkpostors (`impostorCount` & `revealImpostorTeammates`)
 * **Maximum Inkpostors**: Calculated dynamically from lobby player count $N$:
@@ -72,7 +85,7 @@ instead. `hideHint` and `impostorCount` are available in **every** mode.
 | `WORD_SELECTION` | Player-word modes only. Every player writes and confirms a word. Reached instead of `ROLE_REVEAL` when the game starts. |
 | `ROLE_REVEAL` | Players see their role (Inkpostor or Crewmate). Must confirm before proceeding. |
 | `WORD_REVEAL` | `HOT_WORD` mode only. Players see the new word of the round (the impostor, only its category) and confirm. Roles are not shown again — they haven't changed. |
-| `ORDER_INFO` | Spoken modes only. Announces who opens the round and in which direction, then every player confirms. Replaces `DRAWING` as the start of the round. |
+| `ORDER_INFO` | Spoken modes only. Announces who opens the round and in which direction, then every player confirms. Replaces `DRAWING` as the start of the round. Without the virtual voting it is also the *end* of the round: nobody confirms anything and the host reveals the results from here. |
 | `DRAWING` | Players take turns drawing on the canvas. Vote-kick is available. |
 | `VOTING` | All players vote on who they think the Inkpostor is (or skip). |
 | `IMPOSTOR_GUESS` | The ejected Inkpostor gets one final guess at the secret word. Everyone else waits. Only reached when the impostor-guess option is on and the Inkpostor still has an attempt left. |
@@ -88,7 +101,8 @@ LOBBY → WORD_SELECTION       (host starts the game in a player-word mode, ≥ 
 WORD_SELECTION → ROLE_REVEAL (all connected players submit their word)
 ROLE_REVEAL → DRAWING        (all players confirm their role)
 ROLE_REVEAL → ORDER_INFO     (same, in a spoken mode — nothing is drawn)
-ORDER_INFO → VOTING          (all non-ejected players confirm they have read the order)
+ORDER_INFO → VOTING          (all non-ejected players confirm they have read the order — virtual voting on)
+ORDER_INFO → RESULTS         (host reveals the impostors — virtual voting off, ends the game)
 DRAWING → VOTING             (all turns used up, or emergency voting triggered)
 DRAWING → RESULTS            (vote-kick causes game-ending condition)
 DRAWING → RESULTS            (impostor guesses the word correctly — impostor wins)
@@ -156,11 +170,12 @@ RESULTS → ORDER_INFO                (same, in a spoken mode)
 | Inkpostor ejected via vote-kick (`ejectedId === impostorId`) | 🟢 **Crewmates win** — Inkpostor Defeated |
 | Crewmate kicked, impostor still active, connected players < 3 | 🔴 **Inkpostor wins** |
 | Crewmate kicked, impostor disconnected / not in game, connected players < 3 | 🟢 **Crewmates win** — impostor abandoned |
-| Host manually ends game (`endGame`) | 🔴 **Inkpostor wins** (`gameEnded = true`) |
+| Host manually ends game (`endGame`) | ⚪ **Nobody wins** — the game was cut short, so it is closed with `gameEnded = true` **and `endedByHost = true`**, and the clients reveal the Inkpostors instead of a verdict |
+| Host reveals the results of a spoken round (`revealResults`) | ⚪ **Nobody wins** — same ending: the table already voted out loud (`endedByHost = true`) |
 | Voting ends in a tie or everyone skips | ➡ Next round (`ejectedId = null`) |
-| Inkpostor guesses the secret word (any phase: DRAWING / VOTING / IMPOSTOR_GUESS) | 🔴 **Inkpostor wins** (`impostorGuessedCorrectly = true`) |
+| Inkpostor guesses the secret word (any phase: DRAWING / VOTING / IMPOSTOR_GUESS) | 🔴 **Inkpostor wins** (`impostorGuessedCorrectly = true`, and `guessingImpostorId` names which one) |
 | Inkpostor ejected, then fails or skips their final guess | 🟢 **Crewmates win** — Inkpostor Defeated |
-| Inkpostor spends the whole guess pool while `impostorLosesWhenOutOfGuesses` is on | 🟢 **Crewmates win** — Inkpostor Defeated (`impostorOutOfGuesses = true`, no ejection involved) |
+| Inkpostor spends the whole guess pool while `impostorLosesWhenOutOfGuesses` is on | 🟢 **Crewmates win** — Inkpostor Defeated (`impostorOutOfGuesses = true`, no ejection involved; `guessingImpostorId` names who spent it) |
 | Inkpostor disconnects while ejected and owing a final guess (in `IMPOSTOR_GUESS`, or a `VOTING` resolution that would enter it) | 🟢 **Crewmates win** — counts as a surrender (`ejectedId === impostorId`) |
 
 > **Active player (for win/loss conditions)** = `!isEjected` (disconnected players remain assigned to their team until reconnected or kicked).
@@ -256,9 +271,13 @@ and keep the score.
   does (see that section — the impostor's own word is excluded, the category is
   `Special`, and the submissions are never broadcast), and once the phase
   resolves the game continues as `ORIGINAL`.
-- Every round runs `ORDER_INFO → VOTING → RESULTS`. `DRAWING` is never reached,
-  so `canvasStrokes`, `roundTime`, the turn timer, the emergency vote **and the
-  vote-kick** are all inert in these modes.
+- With `virtualVotingEnabled` on, every round runs `ORDER_INFO → VOTING →
+  RESULTS`. `DRAWING` is never reached, so `canvasStrokes`, `roundTime`, the turn
+  timer, the emergency vote **and the vote-kick** are all inert in these modes.
+- With it **off** (the default) the game is a single `ORDER_INFO`, ended by the
+  host's `revealResults`: the table votes out loud, so there is no ejection, no
+  second round and no winner to compute — `RESULTS` simply opens the cards. See
+  *Virtual Voting* above.
 - The word is the same for the whole game, as in `CLASSIC`.
 
 **The order (`turnOrderMode`)**
@@ -312,6 +331,7 @@ players (see Custom Word Mode above):
 - The impostor can guess at any point during these phases, bounded by the shared pool (`impostorGuessesUsed`).
 - The pool **persists across rounds** within the same game; it is reset only on `startGame` / `playAgain`.
 - A correct guess ends the game immediately → `RESULTS`, `impostorGuessedCorrectly = true` (🔴 Inkpostor wins).
+- Only a guess that **ends** the game records its author in `guessingImpostorId`, so the result screen can name them instead of the whole team. A guess that settles nothing leaves it `null`, and the field is stripped from every broadcast before the game is over — it would point straight at an impostor.
 - A wrong in-phase guess consumes one attempt and is broadcast **only to the impostor's socket** (so crewmates don't learn that guessing is happening).
 - Unless the pool is lethal: the wrong guess that empties it ends the game → `RESULTS`, `impostorOutOfGuesses = true` (🟢 Crewmates win), which is broadcast to everyone.
 
@@ -355,7 +375,8 @@ players (see Custom Word Mode above):
 | `submitCustomWord` | WORD_SELECTION | Player submits their word (payload: `{ word }`) |
 | `proceedToDrawing` | ROLE_REVEAL | Player confirms role |
 | `confirmNewWord` | WORD_REVEAL | Player confirms they have seen the new word of the round |
-| `confirmOrder` | ORDER_INFO | Player confirms they have read who starts the round |
+| `confirmOrder` | ORDER_INFO | Player confirms they have read who starts the round (resolves nothing while the virtual voting is off) |
+| `revealResults` | ORDER_INFO | Host reveals the impostors and ends the game (host only, spoken mode with the virtual voting off, sets `endedByHost`) |
 | `drawStroke` | DRAWING | Current turn player draws a stroke |
 | `undoStroke` | DRAWING | Current turn player undoes last stroke |
 | `endTurn` | DRAWING | Current turn player ends their turn |
@@ -366,7 +387,7 @@ players (see Custom Word Mode above):
 | `voteKickPlayer` | DRAWING | Any player votes to kick a target |
 | `kickPlayer` | LOBBY | Host removes a player (lobby only) |
 | `nextRound` | RESULTS | Player confirms ready for next round |
-| `endGame` | RESULTS | Host ends the game (host only) |
+| `endGame` | any phase but LOBBY | Host ends the game (host only, sets `endedByHost`). Rejected in LOBBY: there is no game to end and no impostors to reveal |
 | `playAgain` | RESULTS | Host returns to lobby (host only) |
 
 ---

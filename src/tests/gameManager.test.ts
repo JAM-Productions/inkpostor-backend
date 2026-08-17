@@ -23,6 +23,7 @@ import {
     submitCustomWord,
     confirmNewWord,
     confirmOrder,
+    revealResults,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import {
@@ -67,6 +68,7 @@ describe('gameManager', () => {
                 hideHint: false,
                 turnOrderMode: DEFAULT_TURN_ORDER_MODE,
                 preventRepeatImpostors: true,
+                virtualVotingEnabled: false,
             });
             expect(room.gameMode).toBe('CLASSIC');
 
@@ -919,7 +921,13 @@ describe('gameManager', () => {
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom(id, createPlayer(pid, pid))
             );
-            updateGameOptions(id, 'host1', { gameMode: 'ORIGINAL' });
+            // The virtual voting is off by default, so a test about the VOTING
+            // flow has to turn it on — without it the round never leaves
+            // ORDER_INFO (see 'ORIGINAL mode without virtual voting').
+            updateGameOptions(id, 'host1', {
+                gameMode: 'ORIGINAL',
+                virtualVotingEnabled: true,
+            });
             startGame(id, 'host1');
             room.impostorId = 'host1';
             return room;
@@ -1280,13 +1288,143 @@ describe('gameManager', () => {
         });
     });
 
+    describe('spoken modes without the virtual voting', () => {
+        // The default: nobody votes in the app, so the round sits on ORDER_INFO
+        // until the host reveals the impostors.
+        const setupOrderScreen = (id: string, gameMode = 'ORIGINAL') => {
+            const room = createRoom(id, 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom(id, createPlayer(pid, pid))
+            );
+            updateGameOptions(id, 'host1', { gameMode });
+            startGame(id, 'host1');
+            if (room.phase === 'WORD_SELECTION') {
+                ['host1', 'p2', 'p3'].forEach((pid) =>
+                    submitCustomWord(id, pid, `word-${pid}`)
+                );
+            }
+            ['host1', 'p2', 'p3'].forEach((pid) => proceedToDrawing(id, pid));
+            return room;
+        };
+
+        it('should be off by default and settable by the host', () => {
+            const room = createRoom('virtual-voting-option', 'host1');
+            joinRoom('virtual-voting-option', createPlayer('host1', 'Host'));
+            updateGameOptions('virtual-voting-option', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
+            expect(room.gameOptions.virtualVotingEnabled).toBe(false);
+
+            updateGameOptions('virtual-voting-option', 'host1', {
+                virtualVotingEnabled: true,
+            });
+            expect(room.gameOptions.virtualVotingEnabled).toBe(true);
+
+            // No mode takes it over, so a detour hands it back untouched — it is
+            // only ever read in a spoken mode, exactly like turnOrderMode.
+            updateGameOptions('virtual-voting-option', 'host1', {
+                gameMode: 'CLASSIC',
+            });
+            expect(room.gameOptions.virtualVotingEnabled).toBe(true);
+            updateGameOptions('virtual-voting-option', 'host1', {
+                gameMode: 'ORIGINAL',
+            });
+            expect(room.gameOptions.virtualVotingEnabled).toBe(true);
+        });
+
+        it('should ignore a non-boolean value', () => {
+            const room = createRoom('virtual-voting-bad', 'host1');
+            joinRoom('virtual-voting-bad', createPlayer('host1', 'Host'));
+            updateGameOptions('virtual-voting-bad', 'host1', {
+                gameMode: 'ORIGINAL',
+                virtualVotingEnabled: true,
+            });
+            updateGameOptions('virtual-voting-bad', 'host1', {
+                virtualVotingEnabled: 'nope',
+            });
+            expect(room.gameOptions.virtualVotingEnabled).toBe(true);
+        });
+
+        it('should keep ORDER_INFO even after everyone confirms', () => {
+            const room = setupOrderScreen('virtual-voting-no-gate');
+            expect(room.phase).toBe('ORDER_INFO');
+
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                confirmOrder('virtual-voting-no-gate', pid)
+            );
+
+            // VOTING is unreachable: the confirmations resolve nothing.
+            expect(room.phase).toBe('ORDER_INFO');
+        });
+
+        it('should end the game when the host reveals the results', () => {
+            const room = setupOrderScreen('virtual-voting-reveal');
+            const impostors = [...room.impostorIds];
+
+            const result = revealResults('virtual-voting-reveal', 'host1');
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+            // Nobody was voted out: the reveal is the whole ending, and the
+            // clients read that off the same flag the host's End Game sets.
+            expect(result!.endedByHost).toBe(true);
+            expect(result!.ejectedId).toBeNull();
+            expect(result!.impostorIds).toEqual(impostors);
+            expect(result!.secretWord).not.toBeNull();
+        });
+
+        it('should reveal the same way in ORIGINAL_CHAOS', () => {
+            const room = setupOrderScreen(
+                'virtual-voting-chaos',
+                'ORIGINAL_CHAOS'
+            );
+            expect(room.phase).toBe('ORDER_INFO');
+
+            const result = revealResults('virtual-voting-chaos', 'host1');
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+        });
+
+        it('should reject a reveal from the wrong room, player or phase', () => {
+            expect(revealResults('missing-room', 'host1')).toBeNull();
+
+            const room = setupOrderScreen('virtual-voting-guards');
+            expect(revealResults('virtual-voting-guards', 'p2')).toBeNull();
+            expect(room.phase).toBe('ORDER_INFO');
+
+            room.phase = 'RESULTS';
+            expect(revealResults('virtual-voting-guards', 'host1')).toBeNull();
+        });
+
+        it('should reject a reveal wherever the voting phase is played', () => {
+            const room = setupOrderScreen('virtual-voting-on-reveal');
+            room.gameOptions.virtualVotingEnabled = true;
+            expect(
+                revealResults('virtual-voting-on-reveal', 'host1')
+            ).toBeNull();
+            expect(room.phase).toBe('ORDER_INFO');
+
+            // And a mode that draws never gets there in the first place
+            const classic = createRoom('virtual-voting-classic', 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom('virtual-voting-classic', createPlayer(pid, pid))
+            );
+            startGame('virtual-voting-classic', 'host1');
+            classic.phase = 'ORDER_INFO';
+            expect(revealResults('virtual-voting-classic', 'host1')).toBeNull();
+        });
+    });
+
     describe('ORIGINAL_CHAOS mode', () => {
         const setupLobby = (id: string) => {
             const room = createRoom(id, 'host1');
             ['host1', 'p2', 'p3'].forEach((pid) =>
                 joinRoom(id, createPlayer(pid, pid))
             );
-            updateGameOptions(id, 'host1', { gameMode: 'ORIGINAL_CHAOS' });
+            updateGameOptions(id, 'host1', {
+                gameMode: 'ORIGINAL_CHAOS',
+                virtualVotingEnabled: true,
+            });
             return room;
         };
 
@@ -1924,8 +2062,11 @@ describe('gameManager', () => {
             const roomId = 'room-end';
             const hostId = 'host1';
 
-            // Create a room and set the host
             const room = createRoom(roomId, hostId);
+            [hostId, 'p2', 'p3'].forEach((pid) =>
+                joinRoom(roomId, createPlayer(pid, pid))
+            );
+            startGame(roomId, hostId);
             expect(room).toBeDefined();
 
             // End the game
@@ -1933,6 +2074,19 @@ describe('gameManager', () => {
             expect(endedRoom).toBeDefined();
             expect(endedRoom?.phase).toBe('RESULTS');
             expect(endedRoom?.gameEnded).toBe(true);
+        });
+
+        it('should refuse to end a game that has not started', () => {
+            // There would be no impostors to reveal: the clients would open
+            // RESULTS on an empty list.
+            const room = createRoom('room-end-lobby', 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom('room-end-lobby', createPlayer(pid, pid))
+            );
+
+            expect(endGame('room-end-lobby', 'host1')).toBeNull();
+            expect(room.phase).toBe('LOBBY');
+            expect(room.gameEnded).toBe(false);
         });
 
         it('should not end the game if a non-host player calls it', () => {
@@ -1952,6 +2106,31 @@ describe('gameManager', () => {
         it('should return null if the room does not exist', () => {
             const endedRoom = endGame('nonexistent-room', 'host1');
             expect(endedRoom).toBeNull();
+        });
+
+        it('should mark the game as closed by the host, and clear it on a new game', () => {
+            // Nothing was played out, so the clients show the impostors instead
+            // of a winner — which they cannot tell from a natural ending.
+            const room = createRoom('room-end-flag', 'host1');
+            ['host1', 'p2', 'p3'].forEach((pid) =>
+                joinRoom('room-end-flag', createPlayer(pid, pid))
+            );
+            startGame('room-end-flag', 'host1');
+            expect(room.endedByHost).toBe(false);
+
+            endGame('room-end-flag', 'host1');
+            expect(room.endedByHost).toBe(true);
+
+            // Both ways back into a game clear it
+            playAgain('room-end-flag', 'host1');
+            expect(room.endedByHost).toBe(false);
+
+            startGame('room-end-flag', 'host1');
+            endGame('room-end-flag', 'host1');
+            expect(room.endedByHost).toBe(true);
+
+            startGame('room-end-flag', 'host1');
+            expect(room.endedByHost).toBe(false);
         });
     });
 
@@ -2067,6 +2246,56 @@ describe('gameManager', () => {
             // Turn skips to P3
             expect(result!.currentTurnPlayerId).toBe('p3');
             expect(result!.turnIndex).toBe(1);
+        });
+
+        it('should remember a kicked player whose kick ends the game', () => {
+            // Kicking the impostor ends it, and takes the one player the result
+            // screen has to name out of the room.
+            const room = createRoom('room-votekick-impostor', 'host1');
+            ['host1', 'p2', 'p3', 'p4'].forEach((pid) =>
+                joinRoom('room-votekick-impostor', createPlayer(pid, pid))
+            );
+            room.phase = 'DRAWING';
+            room.impostorId = 'p2';
+            room.impostorIds = ['p2'];
+            expect(room.kickedOutPlayers).toEqual([]);
+
+            voteKickPlayer('room-votekick-impostor', 'host1', 'p2');
+            voteKickPlayer('room-votekick-impostor', 'p3', 'p2');
+            const result = voteKickPlayer('room-votekick-impostor', 'p4', 'p2');
+
+            expect(result!.phase).toBe('RESULTS');
+            expect(result!.gameEnded).toBe(true);
+            expect(result!.ejectedId).toBe('p2');
+            expect(result!.players.find((p) => p.id === 'p2')).toBeUndefined();
+            expect(result!.kickedOutPlayers).toEqual([
+                { id: 'p2', name: 'p2' },
+            ]);
+
+            // ...and a fresh game starts without that record
+            playAgain('room-votekick-impostor', 'host1');
+            expect(room.kickedOutPlayers).toEqual([]);
+        });
+
+        it('should remember an impostor kicked while the game goes on', () => {
+            // Two impostors: kicking one leaves the game running, but that
+            // player is gone from the room for good — and the result screen
+            // still has to name them when the game ends later.
+            const room = createRoom('room-votekick-one-of-two', 'host1');
+            ['host1', 'p2', 'p3', 'p4', 'p5'].forEach((pid) =>
+                joinRoom('room-votekick-one-of-two', createPlayer(pid, pid))
+            );
+            room.phase = 'DRAWING';
+            room.impostorId = 'p2';
+            room.impostorIds = ['p2', 'p3'];
+
+            ['host1', 'p4', 'p5', 'p3'].forEach((voterId) =>
+                voteKickPlayer('room-votekick-one-of-two', voterId, 'p2')
+            );
+
+            expect(room.players.find((p) => p.id === 'p2')).toBeUndefined();
+            expect(room.phase).toBe('DRAWING'); // one impostor is still in play
+            expect(room.kickedOutPlayers).toEqual([{ id: 'p2', name: 'p2' }]);
         });
 
         it('should switch to VOTING when the last current turn player is kicked', () => {
@@ -2652,6 +2881,8 @@ describe('gameManager', () => {
             expect(result!.impostorGuessedCorrectly).toBe(true);
             expect(result!.phase).toBe('RESULTS');
             expect(result!.gameEnded).toBe(true);
+            // The winning guess belongs to one impostor, not to the team
+            expect(result!.guessingImpostorId).toBe('imp');
         });
 
         it('should validate against the selected language (Spanish)', () => {
@@ -2880,6 +3111,9 @@ describe('gameManager', () => {
             expect(first!.phase).toBe('DRAWING');
             expect(first!.gameEnded).toBe(false);
             expect(room.impostorOutOfGuesses).toBe(false);
+            // A guess that settles nothing must not point at an impostor: this
+            // travels to every client.
+            expect(first!.guessingImpostorId).toBeNull();
 
             const last = submitImpostorGuess(
                 'guess-lethal-pool',
@@ -2892,6 +3126,12 @@ describe('gameManager', () => {
             expect(last!.phase).toBe('RESULTS');
             expect(last!.gameEnded).toBe(true);
             expect(last!.impostorGuessedCorrectly).toBe(false);
+            // ...but the one that ended it does, so the result screen can name
+            // whoever burned the pool instead of the whole team.
+            expect(last!.guessingImpostorId).toBe('imp');
+
+            playAgain('guess-lethal-pool', 'host1');
+            expect(room.guessingImpostorId).toBeNull();
         });
 
         it('should keep playing on an exhausted pool when it is not lethal', () => {

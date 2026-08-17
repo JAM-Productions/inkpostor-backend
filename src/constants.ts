@@ -40,6 +40,12 @@ const PLAYER_WORD_GAME_MODES: GameMode[] = ['CUSTOM_WORD', 'ORIGINAL_CHAOS'];
 export function isPlayerWordMode(mode: GameMode): boolean {
     return PLAYER_WORD_GAME_MODES.includes(mode);
 }
+// Whether the round goes through the VOTING phase. The modes that draw always
+// do; a spoken mode only does it when the host turned the virtual voting on,
+// since the whole point of the in-person game is voting at the table.
+export function usesVotingPhase(mode: GameMode, options: GameOptions): boolean {
+    return !isSpokenMode(mode) || options.virtualVotingEnabled;
+}
 export const TURN_ORDER_MODES = [
     'RANDOM_STARTER',
     'FIXED_ORDER',
@@ -62,6 +68,7 @@ export const DEFAULT_GAME_OPTIONS: GameOptions = {
     hideHint: false,
     turnOrderMode: DEFAULT_TURN_ORDER_MODE,
     preventRepeatImpostors: true,
+    virtualVotingEnabled: false,
 };
 
 // The guessing sub-option means nothing while the feature itself is off, so
