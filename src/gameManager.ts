@@ -595,11 +595,17 @@ export function sanitizeStrokePayload(
     return sanitizeStroke(payload);
 }
 
+export interface AddStrokeResult {
+    room: GameRoom;
+    addedStrokes: StrokeData | StrokeData[];
+    trimmed: boolean;
+}
+
 export function addStroke(
     roomId: string,
     playerId: string,
     stroke: unknown
-): GameRoom | null {
+): AddStrokeResult | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (room.currentTurnPlayerId !== playerId) return null; // Only active player can draw
@@ -617,11 +623,13 @@ export function addStroke(
         room.canvasStrokes.push(sanitized);
     }
 
+    let trimmed = false;
     if (room.canvasStrokes.length > MAX_CANVAS_STROKES) {
-        room.canvasStrokes.splice(
-            0,
-            room.canvasStrokes.length - MAX_CANVAS_STROKES
-        );
+        // Bulk trim down to 90% of MAX_CANVAS_STROKES so trimming occurs
+        // in chunks (e.g. every ~2,000 points) rather than every single frame.
+        const trimTarget = Math.floor(MAX_CANVAS_STROKES * 0.9);
+        const excess = room.canvasStrokes.length - trimTarget;
+        room.canvasStrokes.splice(0, excess);
         // Ensure the new start point begins a fresh stroke path so it doesn't join with dropped points
         if (room.canvasStrokes.length > 0) {
             room.canvasStrokes[0] = {
@@ -631,9 +639,14 @@ export function addStroke(
         }
         // Increment epoch so clients are notified of the canvas trim
         room.canvasEpoch += 1;
+        trimmed = true;
     }
 
-    return room;
+    return {
+        room,
+        addedStrokes: sanitized,
+        trimmed,
+    };
 }
 
 export function undoStroke(roomId: string, playerId: string): GameRoom | null {

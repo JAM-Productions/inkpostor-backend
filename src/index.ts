@@ -32,7 +32,6 @@ import {
     confirmOrder,
     revealResults,
     getImpostorIds,
-    sanitizeStrokePayload,
 } from './gameManager';
 import { GameRoom, Player, StrokeData, UserPayload } from './types';
 import wordTranslations from './wordTranslations.json';
@@ -222,10 +221,10 @@ io.on('connection', (socket: Socket) => {
             socket.join(roomId);
             socketToRoom[socket.id] = roomId;
             // Whoever just walked in has an empty canvas, and state updates no
-            // longer carry the drawing. A mid-game reconnect depends on this.
-            // Emitted before gameStateUpdate so the client already holds the canvas,
+            // longer carry the drawing. If the room already has drawing content,
+            // hand it over before gameStateUpdate so the client has canvas state,
             // avoiding a redundant requestCanvasSync roundtrip.
-            if (joinedRoom.phase !== 'LOBBY') {
+            if (joinedRoom.canvasStrokes.length > 0) {
                 emitCanvasSync(socket, roomId);
             }
             broadcastGameState(roomId);
@@ -253,8 +252,12 @@ io.on('connection', (socket: Socket) => {
                 );
             }
         } else {
-            socket.emit('error', 'Cannot join room');
+            socket.emit('error', 'Could not join room');
         }
+    });
+
+    socket.on('leaveRoom', () => {
+        leaveCurrentRoom(socket);
     });
 
     socket.on('startGame', () => {
@@ -263,9 +266,9 @@ io.on('connection', (socket: Socket) => {
         if (!roomId) return;
         const room = startGame(roomId, user.userId);
         if (room) {
-            // Private roles first, then the sanitised state for everyone. In
-            // CUSTOM_WORD mode the game starts in WORD_SELECTION and there is no
-            // word yet, so roles are only revealed once the players choose it.
+            // Send private role info (impostor status, secret word/category) to each player
+            // ONLY if roles are being revealed right away. In CUSTOM_WORD roles are
+            // withheld until everyone has submitted their word (see submitCustomWord).
             broadcastRoomUpdate(roomId);
         }
     });
@@ -281,9 +284,9 @@ io.on('connection', (socket: Socket) => {
                   ? payload.word
                   : undefined;
         const room = submitCustomWord(roomId, user.userId, word);
-        if (!room) return;
-        // The last word resolves the phase — everyone then learns their role.
-        broadcastRoomUpdate(roomId);
+        if (room) {
+            broadcastRoomUpdate(roomId);
+        }
     });
 
     socket.on('proceedToDrawing', () => {
@@ -330,24 +333,19 @@ io.on('connection', (socket: Socket) => {
         const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = getRoom(roomId);
-        if (!room) return;
-        const epochBefore = room.canvasEpoch;
-        const sanitized = sanitizeStrokePayload(rawStroke);
-        if (!sanitized) return;
 
-        const updatedRoom = addStroke(roomId, user.userId, sanitized);
-        if (updatedRoom) {
-            if (updatedRoom.canvasEpoch !== epochBefore) {
-                // The canvas exceeded MAX_CANVAS_STROKES and was trimmed from the beginning.
+        const result = addStroke(roomId, user.userId, rawStroke);
+        if (result) {
+            if (result.trimmed) {
+                // The canvas exceeded MAX_CANVAS_STROKES and was bulk-trimmed from the beginning.
                 // Sync the whole room so everyone is aligned on the trimmed drawing.
                 io.to(roomId).emit('canvasSync', {
-                    epoch: updatedRoom.canvasEpoch,
-                    strokes: updatedRoom.canvasStrokes,
+                    epoch: result.room.canvasEpoch,
+                    strokes: result.room.canvasStrokes,
                 });
             } else {
                 // Broadcast sanitized stroke batch to others instantly for smooth drawing.
-                socket.to(roomId).emit('strokeUpdate', sanitized);
+                socket.to(roomId).emit('strokeUpdate', result.addedStrokes);
             }
         }
     });

@@ -1671,7 +1671,9 @@ describe('gameManager', () => {
             // Valid add
             const result1 = addStroke('room-stroke', 'p1', stroke);
             expect(result1).not.toBeNull();
-            expect(result1!.canvasStrokes.length).toBe(1);
+            expect(result1!.room.canvasStrokes.length).toBe(1);
+            expect(result1!.addedStrokes).toEqual(stroke);
+            expect(result1!.trimmed).toBe(false);
 
             // Invalid player add
             const result2 = addStroke('room-stroke', 'p2', stroke);
@@ -1718,7 +1720,7 @@ describe('gameManager', () => {
                     point(2),
                 ]);
 
-                expect(result!.canvasStrokes).toEqual([
+                expect(result!.room.canvasStrokes).toEqual([
                     point(0, true),
                     point(1),
                     point(2),
@@ -1799,12 +1801,12 @@ describe('gameManager', () => {
                 );
 
                 expect(result).not.toBeNull();
-                expect(result!.canvasStrokes).toHaveLength(
+                expect(result!.room.canvasStrokes).toHaveLength(
                     MAX_STROKE_BATCH_SIZE
                 );
             });
 
-            it('drops the oldest points, forces isNewStroke on new head, and bumps epoch when ceiling is reached', () => {
+            it('bulk-trims points down to 90%, forces isNewStroke on new head, and bumps epoch when ceiling is reached', () => {
                 const room = drawingRoom('room-ceiling');
                 room.canvasStrokes = Array.from(
                     { length: MAX_CANVAS_STROKES },
@@ -1812,15 +1814,17 @@ describe('gameManager', () => {
                 );
                 const initialEpoch = room.canvasEpoch;
 
-                addStroke('room-ceiling', 'p1', [point(-1), point(-2)]);
+                const result = addStroke('room-ceiling', 'p1', [
+                    point(-1),
+                    point(-2),
+                ]);
 
-                expect(room.canvasStrokes).toHaveLength(MAX_CANVAS_STROKES);
-                // The two oldest made room for the two that arrived.
-                // The new head is guaranteed to have isNewStroke = true so it doesn't join to trimmed points
-                expect(room.canvasStrokes[0]).toEqual({
-                    ...point(2),
-                    isNewStroke: true,
-                });
+                const expectedTrimmedLength = Math.floor(
+                    MAX_CANVAS_STROKES * 0.9
+                );
+                expect(result!.trimmed).toBe(true);
+                expect(room.canvasStrokes).toHaveLength(expectedTrimmedLength);
+                expect(room.canvasStrokes[0].isNewStroke).toBe(true);
                 expect(room.canvasStrokes.at(-1)).toEqual(point(-2));
                 expect(room.canvasEpoch).toBe(initialEpoch + 1);
             });
