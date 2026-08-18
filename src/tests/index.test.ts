@@ -520,7 +520,7 @@ describe('Server API and Socket Integration Tests', () => {
         ) => {
             const token = await getToken(name, userId);
             const socket = await connectSocket(token);
-            const joined = waitForEvent(socket, 'canvasSync');
+            const joined = waitForEvent(socket, 'gameStateUpdate');
             socket.emit('joinRoom', { roomId });
             await joined;
             return socket;

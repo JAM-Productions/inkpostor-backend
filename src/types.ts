@@ -98,9 +98,10 @@ export interface GameRoom {
     votes: Record<string, string>; // Voter ID -> Voted Player ID (or 'skip')
     kickVotes: Record<string, string[]>; // Target Player ID -> Array of Voter IDs
     canvasStrokes: StrokeData[];
-    // Bumped every time the canvas is wiped. Clients build the drawing from
-    // `strokeUpdate` and reconcile with `canvasSync` — so a wipe needs a signal
-    // of its own, or a client would happily keep painting a cleared canvas.
+    // Bumped whenever the canvas is wiped or bulk-trimmed at the ceiling.
+    // Clients build the drawing from `strokeUpdate` and reconcile with
+    // `canvasSync` — an epoch change signals that the local stroke history
+    // is no longer a valid prefix of the server drawing.
     canvasEpoch: number;
     currentRound: number;
     ejectedId: string | null;

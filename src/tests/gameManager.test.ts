@@ -24,6 +24,8 @@ import {
     confirmNewWord,
     confirmOrder,
     revealResults,
+    sanitizeStroke,
+    sanitizeStrokePayload,
 } from '../gameManager';
 import { Player, StrokeData } from '../types';
 import {
@@ -33,6 +35,7 @@ import {
     DEFAULT_ROUND_TIME,
     DEFAULT_TURN_ORDER_MODE,
     MAX_CANVAS_STROKES,
+    MAX_STROKE_BATCH_SIZE,
     MAX_IMPOSTOR_GUESSES,
     MAX_NUM_PLAYERS_PER_ROOM,
     SPECIAL_CATEGORY,
@@ -1668,7 +1671,9 @@ describe('gameManager', () => {
             // Valid add
             const result1 = addStroke('room-stroke', 'p1', stroke);
             expect(result1).not.toBeNull();
-            expect(result1!.canvasStrokes.length).toBe(1);
+            expect(result1!.room.canvasStrokes.length).toBe(1);
+            expect(result1!.addedStrokes).toEqual(stroke);
+            expect(result1!.trimmed).toBe(false);
 
             // Invalid player add
             const result2 = addStroke('room-stroke', 'p2', stroke);
@@ -1715,7 +1720,7 @@ describe('gameManager', () => {
                     point(2),
                 ]);
 
-                expect(result!.canvasStrokes).toEqual([
+                expect(result!.room.canvasStrokes).toEqual([
                     point(0, true),
                     point(1),
                     point(2),
@@ -1737,19 +1742,91 @@ describe('gameManager', () => {
                 expect(addStroke('room-empty-batch', 'p1', [])).toBeNull();
             });
 
-            it('drops the oldest points once the ceiling is reached', () => {
+            it('sanitizes malformed stroke points and rejects invalid batches', () => {
+                drawingRoom('room-sanitize');
+                expect(sanitizeStroke(null)).toBeNull();
+                expect(sanitizeStroke('invalid')).toBeNull();
+                expect(
+                    sanitizeStroke({ x: NaN, y: 0, color: '#000' })
+                ).toBeNull();
+                expect(
+                    sanitizeStroke({ x: 0, y: Infinity, color: '#000' })
+                ).toBeNull();
+                expect(sanitizeStroke({ x: 0, y: 0, color: '' })).toBeNull();
+                expect(
+                    sanitizeStroke({ x: 0, y: 0, color: 'a'.repeat(100) })
+                ).toBeNull();
+
+                expect(
+                    sanitizeStroke({
+                        x: 10,
+                        y: 20,
+                        color: '#ff0000',
+                        isNewStroke: 1,
+                    })
+                ).toEqual({
+                    x: 10,
+                    y: 20,
+                    color: '#ff0000',
+                    isNewStroke: true,
+                });
+
+                // Batch sanitization ignores invalid items
+                expect(
+                    sanitizeStrokePayload([
+                        { x: 1, y: 1, color: '#111' },
+                        { invalid: true },
+                        { x: 2, y: 2, color: '#222', isNewStroke: true },
+                    ])
+                ).toEqual([
+                    { x: 1, y: 1, color: '#111', isNewStroke: false },
+                    { x: 2, y: 2, color: '#222', isNewStroke: true },
+                ]);
+
+                // All invalid batch yields null and is rejected
+                expect(
+                    addStroke('room-sanitize', 'p1', [{ invalid: true }])
+                ).toBeNull();
+            });
+
+            it('truncates oversized batches to MAX_STROKE_BATCH_SIZE', () => {
+                drawingRoom('room-oversized-batch');
+                const oversized = Array.from({ length: 600 }, (_, i) =>
+                    point(i)
+                );
+                const result = addStroke(
+                    'room-oversized-batch',
+                    'p1',
+                    oversized
+                );
+
+                expect(result).not.toBeNull();
+                expect(result!.room.canvasStrokes).toHaveLength(
+                    MAX_STROKE_BATCH_SIZE
+                );
+            });
+
+            it('bulk-trims points down to 90%, forces isNewStroke on new head, and bumps epoch when ceiling is reached', () => {
                 const room = drawingRoom('room-ceiling');
                 room.canvasStrokes = Array.from(
                     { length: MAX_CANVAS_STROKES },
-                    (_, i) => point(i)
+                    (_, i) => point(i, false)
                 );
+                const initialEpoch = room.canvasEpoch;
 
-                addStroke('room-ceiling', 'p1', [point(-1), point(-2)]);
+                const result = addStroke('room-ceiling', 'p1', [
+                    point(-1),
+                    point(-2),
+                ]);
 
-                expect(room.canvasStrokes).toHaveLength(MAX_CANVAS_STROKES);
-                // The two oldest made room for the two that arrived.
-                expect(room.canvasStrokes[0]).toEqual(point(2));
+                const expectedTrimmedLength = Math.floor(
+                    MAX_CANVAS_STROKES * 0.9
+                );
+                expect(result!.trimmed).toBe(true);
+                expect(room.canvasStrokes).toHaveLength(expectedTrimmedLength);
+                expect(room.canvasStrokes[0].isNewStroke).toBe(true);
                 expect(room.canvasStrokes.at(-1)).toEqual(point(-2));
+                expect(room.canvasEpoch).toBe(initialEpoch + 1);
             });
 
             it('bumps the epoch when a game starts, so clients wipe too', () => {

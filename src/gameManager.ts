@@ -17,6 +17,7 @@ import {
     isPlayerWordMode,
     isSpokenMode,
     MAX_CANVAS_STROKES,
+    MAX_STROKE_BATCH_SIZE,
     MAX_CUSTOM_WORD_LENGTH,
     MODE_LOCKED_OPTIONS,
     MAX_IMPOSTOR_GUESSES,
@@ -551,42 +552,101 @@ export function nextTurn(roomId: string, playerId: string): GameRoom | null {
 /**
  * Wipes the canvas and tells clients to do the same.
  *
- * Every reset goes through here so the epoch can never drift from the strokes:
- * clients only learn about a wipe from that number.
+ * All global resets go through here so the epoch stays aligned with strokes:
+ * clients learn about a wipe from that number.
+ * (Note: `undoStroke` is the intentional exception that clears canvasStrokes
+ * directly without incrementing canvasEpoch, because undo operations are
+ * tracked and communicated via the dedicated `strokeUndone` event).
  */
 export function resetCanvas(room: GameRoom): void {
     room.canvasStrokes = [];
     room.canvasEpoch += 1;
 }
 
+export function sanitizeStroke(input: unknown): StrokeData | null {
+    if (typeof input !== 'object' || input === null) return null;
+    const { x, y, color, isNewStroke } = input as Record<string, unknown>;
+    if (typeof x !== 'number' || !Number.isFinite(x)) return null;
+    if (typeof y !== 'number' || !Number.isFinite(y)) return null;
+    if (typeof color !== 'string' || color.length === 0 || color.length > 64) {
+        return null;
+    }
+    return {
+        x,
+        y,
+        color,
+        isNewStroke: Boolean(isNewStroke),
+    };
+}
+
+export function sanitizeStrokePayload(
+    payload: unknown
+): StrokeData | StrokeData[] | null {
+    if (Array.isArray(payload)) {
+        if (payload.length === 0) return null;
+        const sanitized: StrokeData[] = [];
+        const limit = Math.min(payload.length, MAX_STROKE_BATCH_SIZE);
+        for (let i = 0; i < limit; i++) {
+            const s = sanitizeStroke(payload[i]);
+            if (s) sanitized.push(s);
+        }
+        return sanitized.length > 0 ? sanitized : null;
+    }
+    return sanitizeStroke(payload);
+}
+
+export interface AddStrokeResult {
+    room: GameRoom;
+    addedStrokes: StrokeData | StrokeData[];
+    trimmed: boolean;
+}
+
 export function addStroke(
     roomId: string,
     playerId: string,
-    stroke: StrokeData | StrokeData[]
-): GameRoom | null {
+    stroke: unknown
+): AddStrokeResult | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (room.currentTurnPlayerId !== playerId) return null; // Only active player can draw
     const player = room.players.find((p) => p.id === playerId);
     if (!player || player.isEjected) return null;
 
+    const sanitized = sanitizeStrokePayload(stroke);
+    if (!sanitized) return null;
+
     // Clients coalesce a frame's worth of pointer moves into one message, but an
     // older one still sends a point at a time.
-    if (Array.isArray(stroke)) {
-        if (stroke.length === 0) return null;
-        room.canvasStrokes.push(...stroke);
+    if (Array.isArray(sanitized)) {
+        room.canvasStrokes.push(...sanitized);
     } else {
-        room.canvasStrokes.push(stroke);
+        room.canvasStrokes.push(sanitized);
     }
 
+    let trimmed = false;
     if (room.canvasStrokes.length > MAX_CANVAS_STROKES) {
-        room.canvasStrokes.splice(
-            0,
-            room.canvasStrokes.length - MAX_CANVAS_STROKES
-        );
+        // Bulk trim down to 90% of MAX_CANVAS_STROKES so trimming occurs
+        // in chunks (e.g. every ~2,000 points) rather than every single frame.
+        const trimTarget = Math.floor(MAX_CANVAS_STROKES * 0.9);
+        const excess = room.canvasStrokes.length - trimTarget;
+        room.canvasStrokes.splice(0, excess);
+        // Ensure the new start point begins a fresh stroke path so it doesn't join with dropped points
+        if (room.canvasStrokes.length > 0) {
+            room.canvasStrokes[0] = {
+                ...room.canvasStrokes[0],
+                isNewStroke: true,
+            };
+        }
+        // Increment epoch so clients are notified of the canvas trim
+        room.canvasEpoch += 1;
+        trimmed = true;
     }
 
-    return room;
+    return {
+        room,
+        addedStrokes: sanitized,
+        trimmed,
+    };
 }
 
 export function undoStroke(roomId: string, playerId: string): GameRoom | null {
