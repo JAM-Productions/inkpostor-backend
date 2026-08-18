@@ -32,6 +32,7 @@ import {
     confirmOrder,
     revealResults,
     getImpostorIds,
+    sanitizeStrokePayload,
 } from './gameManager';
 import { GameRoom, Player, StrokeData, UserPayload } from './types';
 import wordTranslations from './wordTranslations.json';
@@ -220,10 +221,14 @@ io.on('connection', (socket: Socket) => {
         if (joinedRoom) {
             socket.join(roomId);
             socketToRoom[socket.id] = roomId;
-            broadcastGameState(roomId);
             // Whoever just walked in has an empty canvas, and state updates no
             // longer carry the drawing. A mid-game reconnect depends on this.
-            emitCanvasSync(socket, roomId);
+            // Emitted before gameStateUpdate so the client already holds the canvas,
+            // avoiding a redundant requestCanvasSync roundtrip.
+            if (joinedRoom.phase !== 'LOBBY') {
+                emitCanvasSync(socket, roomId);
+            }
+            broadcastGameState(roomId);
 
             // If the player reconnected into an in-progress game, re-send their
             // private role so they recover amIImpostor / secretWord / category
@@ -321,17 +326,29 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('drawStroke', (stroke: StrokeData | StrokeData[]) => {
+    socket.on('drawStroke', (rawStroke: unknown) => {
         const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = addStroke(roomId, user.userId, stroke);
-        if (room) {
-            // Broadcast stroke to others instantly for smooth drawing. The
-            // payload is forwarded in the shape it arrived in — a batch from a
-            // current client, a single point from an older one — and the client
-            // handler accepts both.
-            socket.to(roomId).emit('strokeUpdate', stroke);
+        const room = getRoom(roomId);
+        if (!room) return;
+        const epochBefore = room.canvasEpoch;
+        const sanitized = sanitizeStrokePayload(rawStroke);
+        if (!sanitized) return;
+
+        const updatedRoom = addStroke(roomId, user.userId, sanitized);
+        if (updatedRoom) {
+            if (updatedRoom.canvasEpoch !== epochBefore) {
+                // The canvas exceeded MAX_CANVAS_STROKES and was trimmed from the beginning.
+                // Sync the whole room so everyone is aligned on the trimmed drawing.
+                io.to(roomId).emit('canvasSync', {
+                    epoch: updatedRoom.canvasEpoch,
+                    strokes: updatedRoom.canvasStrokes,
+                });
+            } else {
+                // Broadcast sanitized stroke batch to others instantly for smooth drawing.
+                socket.to(roomId).emit('strokeUpdate', sanitized);
+            }
         }
     });
 
