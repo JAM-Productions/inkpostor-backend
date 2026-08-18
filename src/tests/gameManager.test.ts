@@ -1668,7 +1668,7 @@ describe('gameManager', () => {
             // Valid add
             const result1 = addStroke('room-stroke', 'p1', stroke);
             expect(result1).not.toBeNull();
-            expect(result1!.canvasStrokes.length).toBe(1);
+            expect(result1!.room.canvasStrokes.length).toBe(1);
 
             // Invalid player add
             const result2 = addStroke('room-stroke', 'p2', stroke);
@@ -1706,6 +1706,17 @@ describe('gameManager', () => {
                 isNewStroke,
             });
 
+            // A point as it comes back out once the server has stamped it.
+            const authored = (
+                stroke: StrokeData,
+                playerId = 'p1',
+                round = 1
+            ): StrokeData => ({
+                ...stroke,
+                playerId,
+                round,
+            });
+
             it('appends every point of a batch', () => {
                 drawingRoom('room-batch');
 
@@ -1715,8 +1726,8 @@ describe('gameManager', () => {
                     point(2),
                 ]);
 
-                expect(result!.canvasStrokes).toEqual([
-                    point(0, true),
+                expect(result!.room.canvasStrokes).toEqual([
+                    authored(point(0, true)),
                     point(1),
                     point(2),
                 ]);
@@ -1728,8 +1739,103 @@ describe('gameManager', () => {
                 addStroke('room-single', 'p1', point(0, true));
 
                 expect(getRoom('room-single')!.canvasStrokes).toEqual([
-                    point(0, true),
+                    authored(point(0, true)),
                 ]);
+            });
+
+            it('hands back what it stored, which is what the others get sent', () => {
+                drawingRoom('room-returned');
+
+                const result = addStroke('room-returned', 'p1', [
+                    point(0, true),
+                    point(1),
+                ]);
+
+                expect(result!.strokes).toEqual([
+                    authored(point(0, true)),
+                    point(1),
+                ]);
+                // The very points that went into the room, so a broadcast of them
+                // cannot drift from what a later canvasSync will say.
+                expect(result!.strokes).toEqual(result!.room.canvasStrokes);
+            });
+
+            it('stamps the round, which a canvas kept between them needs', () => {
+                // With clearCanvasEachRound off the drawing holds several rounds
+                // at once, and nothing else says where one of them ended.
+                const room = drawingRoom('room-rounds');
+
+                addStroke('room-rounds', 'p1', [point(0, true), point(1)]);
+                room.currentRound = 2;
+                addStroke('room-rounds', 'p1', [point(2, true), point(3)]);
+
+                expect(room.canvasStrokes).toEqual([
+                    authored(point(0, true)),
+                    point(1),
+                    authored(point(2, true), 'p1', 2),
+                    point(3),
+                ]);
+            });
+
+            it('names the opening point of every batch, so a turn change shows', () => {
+                // Both are in before the phase moves on: nobody joins mid-game.
+                const room = createRoom('room-authors', 'p1');
+                ['p1', 'p2'].forEach((id) =>
+                    joinRoom('room-authors', {
+                        id,
+                        name: id.toUpperCase(),
+                        isConnected: true,
+                        score: 0,
+                        hasStartedEmergencyVoting: false,
+                    })
+                );
+                room.phase = 'DRAWING';
+                room.currentTurnPlayerId = 'p1';
+
+                addStroke('room-authors', 'p1', [point(0, true), point(1)]);
+                room.currentTurnPlayerId = 'p2';
+                addStroke('room-authors', 'p2', [point(2, true), point(3)]);
+
+                expect(room.canvasStrokes).toEqual([
+                    authored(point(0, true)),
+                    point(1),
+                    authored(point(2, true), 'p2'),
+                    point(3),
+                ]);
+            });
+
+            it('refuses an authorship the client wrote for itself', () => {
+                const room = drawingRoom('room-forged');
+
+                addStroke('room-forged', 'p1', [
+                    { ...point(0, true), playerId: 'p2' },
+                    { ...point(1), playerId: 'p2' },
+                ]);
+
+                // The turn holder the socket authenticated as, not the name in
+                // the payload — and the smuggled one is gone rather than kept.
+                expect(room.canvasStrokes).toEqual([
+                    authored(point(0, true)),
+                    point(1),
+                ]);
+            });
+
+            it('renames the head when the ceiling drops the point that named it', () => {
+                const room = drawingRoom('room-ceiling-author');
+                room.canvasStrokes = Array.from(
+                    { length: MAX_CANVAS_STROKES },
+                    (_, i) => point(i)
+                );
+                // The drawing always opens on a named point; that is the whole
+                // basis for carrying the name forward while reading it.
+                room.canvasStrokes[0].playerId = 'p1';
+                room.canvasStrokes[0].round = 1;
+
+                addStroke('room-ceiling-author', 'p1', [point(-1), point(-2)]);
+
+                // The two oldest went, the first of them the only one carrying
+                // the name, so the point now at the front inherits it.
+                expect(room.canvasStrokes[0]).toEqual(authored(point(2)));
             });
 
             it('ignores an empty batch', () => {

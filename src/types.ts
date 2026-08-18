@@ -65,6 +65,8 @@ export interface StrokeData {
     y: number;
     color: string;
     isNewStroke: boolean;
+    playerId?: string;
+    round?: number;
 }
 
 export interface GameOptions {

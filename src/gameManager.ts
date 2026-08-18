@@ -559,11 +559,19 @@ export function resetCanvas(room: GameRoom): void {
     room.canvasEpoch += 1;
 }
 
+export interface AddStrokeResult {
+    room: GameRoom;
+    // What was actually stored: the points rebuilt from the payload, with the
+    // author stamped on. This, and not the payload that arrived, is what the
+    // other players have to be sent.
+    strokes: StrokeData[];
+}
+
 export function addStroke(
     roomId: string,
     playerId: string,
     stroke: StrokeData | StrokeData[]
-): GameRoom | null {
+): AddStrokeResult | null {
     const room = rooms[roomId];
     if (!room || room.phase !== 'DRAWING') return null;
     if (room.currentTurnPlayerId !== playerId) return null; // Only active player can draw
@@ -572,21 +580,52 @@ export function addStroke(
 
     // Clients coalesce a frame's worth of pointer moves into one message, but an
     // older one still sends a point at a time.
-    if (Array.isArray(stroke)) {
-        if (stroke.length === 0) return null;
-        room.canvasStrokes.push(...stroke);
-    } else {
-        room.canvasStrokes.push(stroke);
-    }
+    const points = Array.isArray(stroke) ? stroke : [stroke];
+    if (points.length === 0) return null;
+
+    // The points are rebuilt rather than stored as they arrived, which drops
+    // whatever field a client made up — an authorship of its own choosing among
+    // them. Who drew this is taken from the turn holder the socket authenticated
+    // as, so it cannot be claimed.
+    const strokes: StrokeData[] = points.map(
+        ({ x, y, color, isNewStroke }) => ({
+            x,
+            y,
+            color,
+            isNewStroke,
+        })
+    );
+    // Only the first point of the batch is stamped. Stamping every one would
+    // hang a uuid off each of the 20.000 points a room can hold, all of them
+    // travelling again on every canvasSync, to repeat what the point before it
+    // already said.
+    strokes[0].playerId = playerId;
+    strokes[0].round = room.currentRound;
+
+    room.canvasStrokes.push(...strokes);
 
     if (room.canvasStrokes.length > MAX_CANVAS_STROKES) {
-        room.canvasStrokes.splice(
+        const dropped = room.canvasStrokes.splice(
             0,
             room.canvasStrokes.length - MAX_CANVAS_STROKES
         );
+        // Carrying the last stamp forward only works if the drawing opens with
+        // one, so a head left bare by the trim inherits what governed it: the
+        // last stamped point among those that just went. Author and round are
+        // stamped together, so one of them is found by finding the other.
+        const head = room.canvasStrokes[0];
+        if (head && !head.playerId) {
+            for (let i = dropped.length - 1; i >= 0; i--) {
+                if (dropped[i].playerId) {
+                    head.playerId = dropped[i].playerId;
+                    head.round = dropped[i].round;
+                    break;
+                }
+            }
+        }
     }
 
-    return room;
+    return { room, strokes };
 }
 
 export function undoStroke(roomId: string, playerId: string): GameRoom | null {
