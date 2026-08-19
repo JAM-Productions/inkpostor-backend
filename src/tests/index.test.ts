@@ -484,7 +484,15 @@ describe('Server API and Socket Integration Tests', () => {
             hostSocket.emit('undoStroke');
             await strokeUndone;
 
-            expect(room!.canvasStrokes).toEqual(strokes.slice(0, 2));
+            // Sent one at a time, so each point opened its own batch and each
+            // came back named.
+            expect(room!.canvasStrokes).toEqual(
+                strokes.slice(0, 2).map((stroke) => ({
+                    ...stroke,
+                    playerId: hostUserId,
+                    round: 1,
+                }))
+            );
 
             hostSocket.disconnect();
         }, 15_000);
@@ -590,7 +598,12 @@ describe('Server API and Socket Integration Tests', () => {
             guest.emit('joinRoom', { roomId });
             const payload = await synced;
 
-            expect(payload.strokes).toEqual(strokes);
+            // The drawing arrives with its authorship on, which is what lets a
+            // client that was not there for it still tell who drew what.
+            expect(payload.strokes).toEqual([
+                { ...strokes[0], playerId: hostId, round: 1 },
+                strokes[1],
+            ]);
             expect(payload.epoch).toBe(getRoom(roomId)!.canvasEpoch);
 
             host.disconnect();
@@ -651,8 +664,15 @@ describe('Server API and Socket Integration Tests', () => {
             );
             host.emit('drawStroke', batch);
 
-            expect(await forwarded).toEqual(batch);
-            expect(getRoom(roomId)!.canvasStrokes).toEqual(batch);
+            const authoredBatch = [
+                { ...batch[0], playerId: hostId, round: 1 },
+                batch[1],
+                batch[2],
+            ];
+            // What the others are sent is what was stored, authorship included —
+            // forwarding the payload as it arrived would leave them without it.
+            expect(await forwarded).toEqual(authoredBatch);
+            expect(getRoom(roomId)!.canvasStrokes).toEqual(authoredBatch);
 
             host.disconnect();
             guest.disconnect();

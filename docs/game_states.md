@@ -377,7 +377,7 @@ players (see Custom Word Mode above):
 | `confirmNewWord` | WORD_REVEAL | Player confirms they have seen the new word of the round |
 | `confirmOrder` | ORDER_INFO | Player confirms they have read who starts the round (resolves nothing while the virtual voting is off) |
 | `revealResults` | ORDER_INFO | Host reveals the impostors and ends the game (host only, spoken mode with the virtual voting off, sets `endedByHost`) |
-| `drawStroke` | DRAWING | Current turn player draws a stroke |
+| `drawStroke` | DRAWING | Current turn player draws a stroke. A `playerId` sent by the client is discarded: the server stamps its own (see `strokeUpdate`) |
 | `undoStroke` | DRAWING | Current turn player undoes last stroke |
 | `endTurn` | DRAWING | Current turn player ends their turn |
 | `startEmergencyVoting` | DRAWING | Any player triggers emergency vote |
@@ -398,7 +398,7 @@ players (see Custom Word Mode above):
 |---|---|
 | `gameStateUpdate` | Full (sanitised) room state broadcast to all players in room |
 | `roleAssignment` | Private role info sent to each player individually once the game reaches `ROLE_REVEAL` (after `WORD_SELECTION` in `CUSTOM_WORD` mode), **and re-sent to a player who reconnects mid-game** so they recover `amIImpostor` / `secretWord` / `secretCategory` |
-| `strokeUpdate` | Real-time stroke broadcast to other players (not the drawer) |
+| `strokeUpdate` | Real-time stroke broadcast to other players (not the drawer). Carries what the server stored, not the payload as it arrived: the first point of every batch has a `playerId` naming the drawer, the rest do not. Reading the drawing means carrying the last `playerId` seen forward — the first point of `canvasStrokes` always has one |
 | `strokeUndone` | Broadcast when a stroke is undone |
 | `kicked` | Sent to a player who was removed (lobby kick or vote-kick) |
 | `error` | Sent on auth failure or other unrecoverable errors |

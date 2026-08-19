@@ -325,13 +325,19 @@ io.on('connection', (socket: Socket) => {
         const user = socket.user;
         const roomId = socketToRoom[socket.id];
         if (!roomId) return;
-        const room = addStroke(roomId, user.userId, stroke);
-        if (room) {
-            // Broadcast stroke to others instantly for smooth drawing. The
-            // payload is forwarded in the shape it arrived in — a batch from a
-            // current client, a single point from an older one — and the client
-            // handler accepts both.
-            socket.to(roomId).emit('strokeUpdate', stroke);
+        const added = addStroke(roomId, user.userId, stroke);
+        if (added) {
+            // Broadcast stroke to others instantly for smooth drawing. What goes
+            // out is what was stored, never the payload that arrived: only the
+            // stored one carries the author the server stamped on it. The shape
+            // it arrived in is kept — a batch from a current client, a single
+            // point from an older one — and the client handler accepts both.
+            socket
+                .to(roomId)
+                .emit(
+                    'strokeUpdate',
+                    Array.isArray(stroke) ? added.strokes : added.strokes[0]
+                );
         }
     });
 
